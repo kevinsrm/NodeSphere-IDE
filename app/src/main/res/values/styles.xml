@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.NodeSphere" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#171529</item>
+        <item name="android:navigationBarColor">#17151e</item>
+        <item name="colorPrimary">#bca4f5</item>
+        <item name="colorSecondary">#ff9d00</item>
+        <item name="android:windowBackground">#242242</item>
+    </style>
+</resources>
