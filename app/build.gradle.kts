@@ -10,9 +10,21 @@ android {
     defaultConfig {
         applicationId = "com.mobile.nodeide"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        // targetSdk 28 mantém a permissão de executar binários gravados no diretório
+        // privado do app (regra W^X do Android 10+). Sem isso, um Node.js importado
+        // ou baixado em files/usr/bin não poderia ser executado. É a mesma escolha
+        // feita pelo Termux.
+        targetSdk = 28
+        versionCode = 2
+        versionName = "1.1"
+    }
+
+    packaging {
+        jniLibs {
+            // Extrai libnode.so (quando empacotado) para nativeLibraryDir, onde o
+            // arquivo pode ser executado com permissão de execução.
+            useLegacyPackaging = true
+        }
     }
 
     compileOptions {

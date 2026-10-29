@@ -51,7 +51,8 @@
 
             <HorizontalScrollView
                 android:layout_width="match_parent"
-                android:layout_height="42dp">
+                android:layout_height="42dp"
+                android:scrollbars="none">
 
                 <LinearLayout
                     android:id="@+id/tabs"
@@ -82,7 +83,8 @@
 
             <HorizontalScrollView
                 android:layout_width="match_parent"
-                android:layout_height="38dp">
+                android:layout_height="38dp"
+                android:scrollbars="none">
 
                 <LinearLayout
                     android:id="@+id/symbols"
@@ -97,7 +99,7 @@
     <TextView
         android:id="@+id/handle"
         android:layout_width="match_parent"
-        android:layout_height="24dp"
+        android:layout_height="26dp"
         android:gravity="center"
         android:text="━━  TERMINAL  ━━"
         android:textColor="#ABB6D0"
@@ -106,30 +108,59 @@
     <LinearLayout
         android:id="@+id/terminalPanel"
         android:layout_width="match_parent"
-        android:layout_height="160dp"
+        android:layout_height="200dp"
         android:visibility="gone"
         android:orientation="vertical"
-        android:background="#0B1020">
+        android:background="#070B16">
 
         <ScrollView
             android:id="@+id/terminalScroll"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1">
+            android:layout_weight="1"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp">
 
             <TextView
                 android:id="@+id/output"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:padding="8dp"
-                android:textColor="#B9E7D9"
+                android:paddingTop="6dp"
+                android:textColor="#C9D3E6"
                 android:fontFamily="monospace"
                 android:textSize="12sp" />
         </ScrollView>
 
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/keys"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:background="#0C1322" />
+        </HorizontalScrollView>
+
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="48dp">
+            android:layout_height="46dp"
+            android:orientation="horizontal"
+            android:background="#0C1322">
+
+            <TextView
+                android:id="@+id/promptMark"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:paddingLeft="8dp"
+                android:paddingRight="4dp"
+                android:text="❯"
+                android:textColor="#7BD88F"
+                android:fontFamily="monospace"
+                android:textSize="14sp" />
 
             <EditText
                 android:id="@+id/command"
@@ -137,15 +168,19 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:singleLine="true"
-                android:hint="$ comando"
+                android:hint="comando"
+                android:background="@null"
                 android:textColor="#ffffff"
-                android:textColorHint="#7F8CA8"
-                android:textSize="13sp" />
+                android:textColorHint="#5C6884"
+                android:fontFamily="monospace"
+                android:textSize="13sp"
+                android:inputType="textNoSuggestions" />
 
             <Button
                 android:id="@+id/execute"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
+                android:minWidth="52dp"
                 android:text="▶" />
         </LinearLayout>
     </LinearLayout>

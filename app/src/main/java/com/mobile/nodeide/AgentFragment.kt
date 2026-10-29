@@ -337,11 +337,13 @@ class AgentFragment : Fragment() {
                 val command = arguments.getString("command")
                 val capture = File.createTempFile("agent", ".log", main.cacheDir)
                 try {
-                    val process = ProcessBuilder("/system/bin/sh", "-c", command)
-                        .directory(root)
-                        .redirectErrorStream(true)
-                        .redirectOutput(capture)
-                        .start()
+                    val builder = ProcessBuilder("/system/bin/sh", "-c", command)
+                    builder.directory(root)
+                    builder.redirectErrorStream(true)
+                    builder.redirectOutput(capture)
+                    // Mesmo ambiente do terminal: node/npm do prefixo entram no PATH.
+                    builder.environment().putAll(main.runtime.environment(root))
+                    val process = builder.start()
                     if (!process.waitFor(30, TimeUnit.SECONDS)) {
                         process.destroyForcibly()
                         return "Comando excedeu 30 segundos e foi interrompido."
