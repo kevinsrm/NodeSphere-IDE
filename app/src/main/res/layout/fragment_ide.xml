@@ -71,7 +71,8 @@
                 <com.mobile.nodeide.CodeEditor
                     android:id="@+id/editor"
                     android:layout_width="match_parent"
-                    android:layout_height="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="200dp"
                     android:gravity="top|start"
                     android:background="#0D1425"
                     android:padding="10dp"
