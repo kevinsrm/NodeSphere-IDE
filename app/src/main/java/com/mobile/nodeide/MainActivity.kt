@@ -26,6 +26,9 @@ class MainActivity : AppCompatActivity() {
     var project: File? = null
         private set
 
+    /** Runtime de Node.js/npm compartilhado pelas telas. */
+    val runtime: NodeRuntime by lazy { NodeRuntime(this) }
+
     private lateinit var navigation: BottomNavigationView
     private var selectedDestination = R.id.nav_projects
     private var changingDestination = false
@@ -48,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         applySystemInsets()
         filesDir.mkdirs()
         navigation = findViewById(R.id.navigation)
+        bootstrapRuntime()
 
         if (savedInstanceState != null) {
             savedInstanceState.getString(KEY_PROJECT)?.let { project = File(it) }
@@ -68,8 +72,11 @@ class MainActivity : AppCompatActivity() {
             show(ProjectsFragment())
         } else {
             selectDestination(selectedDestination)
-            if (supportFragmentManager.findFragmentById(R.id.content) == null) {
+            val current = supportFragmentManager.findFragmentById(R.id.content)
+            if (current == null) {
                 show(destinationFragment(selectedDestination))
+            } else {
+                navigation.visibility = if (current is IdeFragment) View.GONE else View.VISIBLE
             }
         }
     }
@@ -105,6 +112,9 @@ class MainActivity : AppCompatActivity() {
             else -> R.id.nav_projects
         }
         selectDestination(destination)
+        // O editor ocupa a tela inteira: a barra de navegação inferior só aparece
+        // nas telas de projetos, plugins e agente.
+        navigation.visibility = if (fragment is IdeFragment) View.GONE else View.VISIBLE
         // Fragment navigation can be triggered by an import/clone worker after the
         // Activity has saved its state. In that case commit() throws and used to
         // take down the whole editor; retaining the latest destination is safer.
@@ -112,6 +122,26 @@ class MainActivity : AppCompatActivity() {
             .setReorderingAllowed(true)
             .replace(R.id.content, fragment)
             .commitAllowingStateLoss()
+    }
+
+    /**
+     * Prepara o prefixo do runtime e, quando o APK traz um executável de Node em
+     * `jniLibs/<abi>/libnode.so`, instala o Node e baixa o npm em segundo plano.
+     */
+    private fun bootstrapRuntime() {
+        if (bootstrapped) return
+        bootstrapped = true
+        Thread({
+            try {
+                runtime.prepare()
+                runtime.installBundled()
+                if (runtime.isNodeInstalled() && !runtime.isNpmInstalled()) {
+                    runtime.installNpm()
+                }
+            } catch (error: Exception) {
+                android.util.Log.w("NodeSphere", "Bootstrap do runtime: ${error.message}")
+            }
+        }, "nodesphere-runtime").start()
     }
 
     private fun selectDestination(destination: Int) {
@@ -174,6 +204,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        @Volatile
+        private var bootstrapped = false
+
         private const val KEY_PROJECT = "project"
         private const val KEY_DESTINATION = "destination"
 

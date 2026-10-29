@@ -11,26 +11,29 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import java.io.BufferedWriter
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
 import java.util.ArrayDeque
+import kotlin.math.abs
 import java.util.Locale
 
 /**
  * Editor do projeto: árvore de arquivos, abas, barra de símbolos, undo/redo e
- * shell persistente do Android no diretório do projeto.
+ * terminal integrado no estilo do Termux (prompt, histórico, cores ANSI e
+ * ambiente próprio com `node`/`npm` quando o runtime está instalado).
  */
 class IdeFragment : Fragment() {
 
     private lateinit var main: MainActivity
+    private lateinit var runtime: NodeRuntime
     private lateinit var editor: CodeEditor
     private lateinit var tree: RecyclerView
     private lateinit var rows: Rows
@@ -38,6 +41,7 @@ class IdeFragment : Fragment() {
     private lateinit var panel: LinearLayout
     private lateinit var output: TextView
     private lateinit var command: EditText
+    private lateinit var terminalScroll: ScrollView
     private lateinit var project: File
 
     private var currentFile: File? = null
@@ -45,10 +49,12 @@ class IdeFragment : Fragment() {
     private var dirty = false
     private var saved = ""
     private var previous = ""
-    private var shell: Process? = null
-    private var shellInput: BufferedWriter? = null
+    private var historyIndex = -1
     private var dragStartY = 0f
     private var dragStartHeight = 0
+    private var dragging = false
+
+    private var shell: ShellSession? = null
 
     private val visible = mutableListOf<File>()
     private val visitedDirectories = mutableSetOf<String>()
@@ -65,6 +71,7 @@ class IdeFragment : Fragment() {
         val root = inflater.inflate(R.layout.fragment_ide, container, false)
         return try {
             main = requireActivity() as MainActivity
+            runtime = main.runtime
             val directory = main.project
             if (directory == null) {
                 main.show(ProjectsFragment())
@@ -72,23 +79,29 @@ class IdeFragment : Fragment() {
             }
             project = directory
 
+            val preferences = main.getPreferences(Context.MODE_PRIVATE)
             editor = root.findViewById(R.id.editor)
-            editor.setCompletionEnabled(
-                main.getPreferences(Context.MODE_PRIVATE).getBoolean("autocomplete", false)
-            )
+            editor.setCompletionEnabled(preferences.getBoolean(PREF_AUTOCOMPLETE, false))
+            editor.setLineNumbersEnabled(preferences.getBoolean(PREF_LINE_NUMBERS, true))
             tree = root.findViewById(R.id.tree)
             tabs = root.findViewById(R.id.tabs)
             panel = root.findViewById(R.id.terminalPanel)
             output = root.findViewById(R.id.output)
             command = root.findViewById(R.id.command)
-            if (arguments?.getBoolean(ARG_OPEN_TERMINAL, false) == true) {
-                panel.visibility = View.VISIBLE
-                command.post { command.requestFocus() }
-            }
+            terminalScroll = root.findViewById(R.id.terminalScroll)
+            output.setText("", TextView.BufferType.EDITABLE)
+
+            shell = ShellSession(
+                home = runtime.home,
+                environment = runtime.environment(project),
+                onOutput = { text -> appendTerminal(text) },
+                onPrompt = { appendTerminal(prompt()) },
+                onExit = { message -> appendTerminal("\n[ $message ]\n") }
+            )
 
             tree.layoutManager = LinearLayoutManager(main)
             rows = Rows { position ->
-                val file = visible[position]
+                val file = visible.getOrNull(position) ?: return@Rows
                 if (file.isDirectory) {
                     if (!expanded.add(file.absolutePath)) expanded.remove(file.absolutePath)
                     refreshTree()
@@ -107,21 +120,20 @@ class IdeFragment : Fragment() {
                 save()
                 main.show(AgentFragment())
             }
-            button(toolbar, "▶") { runShell("node server.js") }
-            button(toolbar, "▣") { toggle(panel) }
+            button(toolbar, "▶") { runProject() }
+            button(toolbar, "▣") { toggleTerminal() }
             button(toolbar, "⚙") { settings() }
-            button(toolbar, "↶") { history(undo, redo) }
-            button(toolbar, "↷") { history(redo, undo) }
+            button(toolbar, "↶") { step(undo, redo) }
+            button(toolbar, "↷") { step(redo, undo) }
 
             val quick = root.findViewById<LinearLayout>(R.id.quick)
             button(quick, "＋ Arquivo") { newFile() }
             button(quick, "▣ Salvar") { save() }
             button(quick, "⌕ Buscar") { find() }
-            button(quick, "⌘ Comandos") {
-                panel.visibility = View.VISIBLE
-                command.requestFocus()
-            }
-            button(quick, "■ Parar shell") { stopShell() }
+            button(quick, "▶ Executar") { runProject() }
+            button(quick, "⌘ Terminal") { toggleTerminal() }
+            button(quick, "⇩ npm i") { npmInstall() }
+            button(quick, "■ Parar") { stopShell() }
 
             val symbols = root.findViewById<LinearLayout>(R.id.symbols)
             for (symbol in arrayOf("{", "}", "[", "]", "(", ")", "\"", "'", ";", ":", "<", ">", "←", "→")) {
@@ -130,10 +142,22 @@ class IdeFragment : Fragment() {
                     when (symbol) {
                         "←" -> editor.setSelection(maxOf(0, start - 1))
                         "→" -> editor.setSelection(minOf(editor.length(), start + 1))
-                        else -> editor.text?.insert(start, symbol)
+                        else -> editor.editableText?.insert(start, symbol)
                     }
                 }
             }
+
+            val keys = root.findViewById<LinearLayout>(R.id.keys)
+            button(keys, "↑") { history(1) }
+            button(keys, "↓") { history(-1) }
+            button(keys, "^C") { interrupt() }
+            button(keys, "^D") { stopShell() }
+            button(keys, "clear") { clearTerminal() }
+            button(keys, "|") { insert("|") }
+            button(keys, ">") { insert(">") }
+            button(keys, "~") { insert("~") }
+            button(keys, "/") { insert("/") }
+            button(keys, "-") { insert("-") }
 
             editor.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -148,14 +172,16 @@ class IdeFragment : Fragment() {
                         previous = value
                     }
                 }
+
                 override fun afterTextChanged(e: Editable?) = Unit
             })
 
             root.findViewById<View>(R.id.execute).setOnClickListener {
-                val text = command.text.toString().trim()
-                if (text.isNotEmpty()) {
+                val text = command.text.toString()
+                if (text.isNotBlank()) {
                     command.setText("")
-                    runShell(text)
+                    historyIndex = -1
+                    sendCommand(text)
                 }
             }
 
@@ -165,47 +191,270 @@ class IdeFragment : Fragment() {
                     MotionEvent.ACTION_DOWN -> {
                         dragStartY = event.rawY
                         dragStartHeight = panel.height
+                        dragging = false
                         true
                     }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_MOVE -> {
+                    MotionEvent.ACTION_MOVE -> {
+                        if (abs(event.rawY - dragStartY) > 6f) dragging = true
                         val limit = ((panel.parent as View).height) - 150
-                        panel.layoutParams.height =
-                            maxOf(60, minOf(limit, dragStartHeight + (dragStartY - event.rawY).toInt()))
+                        val wanted = dragStartHeight + (dragStartY - event.rawY).toInt()
+                        panel.layoutParams.height = maxOf(60, minOf(limit, wanted))
+                        if (wanted > 90) panel.visibility = View.VISIBLE
                         panel.requestLayout()
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!dragging) toggleTerminal()
                         true
                     }
                     else -> false
                 }
             }
 
-            output.text = "Terminal integrado • diretório: ${project.name}\n" +
-                "Shell Android (/system/bin/sh). Node.js/npm não vêm pré-instalados.\n"
+            banner()
+            if (arguments?.getBoolean(ARG_OPEN_TERMINAL, false) == true) {
+                panel.visibility = View.VISIBLE
+            }
 
-            defaultEditorFile(project)?.let(::openFile)
+            requireActivity().onBackPressedDispatcher.addCallback(
+                viewLifecycleOwner,
+                object : OnBackPressedCallback(true) {
+                    override fun handleOnBackPressed() {
+                        save()
+                        main.show(ProjectsFragment())
+                    }
+                }
+            )
+
+            defaultFile(project)?.let(::openFile)
             root
         } catch (error: Exception) {
             android.util.Log.e("NodeSphere", "Falha ao abrir o editor", error)
-            LinearLayout(requireContext()).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(32, 32, 32, 32)
-                addView(TextView(context).apply {
-                    text = "Não foi possível carregar o editor.\n${error.message ?: error.javaClass.simpleName}"
-                    setTextColor(0xfff4f5ff.toInt())
-                    textSize = 16f
-                })
-                addView(TextView(context).apply {
-                    text = "Voltar aos projetos"
-                    setTextColor(0xffb9aaff.toInt())
-                    textSize = 16f
-                    setPadding(0, 24, 0, 0)
-                    setOnClickListener { (activity as? MainActivity)?.show(ProjectsFragment()) }
-                })
-            }
+            failure(error)
         }
     }
 
-    private fun defaultEditorFile(directory: File): File? = try {
+    // ---- terminal -----------------------------------------------------------
+
+    private fun banner() {
+        appendTerminal("\u001b[1m╭─ NodeSphere terminal\u001b[0m  /system/bin/sh (sem PTY)\n")
+        appendTerminal("│ PREFIX ${runtime.prefix.absolutePath}\n")
+        appendTerminal("│ node   ${if (runtime.isNodeInstalled()) "instalado" else "não instalado"}\n")
+        appendTerminal("│ npm    ${if (runtime.isNpmInstalled()) "instalado" else "não instalado"}\n")
+        appendTerminal("\u001b[38;5;110m╰─ Digite \u001b[1mhelp\u001b[0m\u001b[38;5;110m para os comandos do NodeSphere.\u001b[0m\n\n")
+        Thread {
+            val node = if (runtime.isNodeInstalled()) runtime.nodeVersion() else null
+            val npm = if (runtime.isNpmInstalled()) runtime.npmVersion() else null
+            if (node == null && npm == null) return@Thread
+            main.runOnUiThread {
+                if (!isAdded) return@runOnUiThread
+                if (node != null) appendTerminal("│ node   $node\n")
+                if (npm != null) appendTerminal("│ npm    $npm\n")
+                appendTerminal(prompt())
+            }
+        }.start()
+    }
+
+    private fun appendTerminal(value: String) {
+        if (!isAdded || view == null) return
+        if (!this::output.isInitialized) return
+        output.append(Ansi.render(value))
+        val content = output.text
+        if (content is Editable && content.length > MAX_TERMINAL_CHARS) {
+            content.delete(0, content.length - MAX_TERMINAL_CHARS)
+        }
+        terminalScroll.post { terminalScroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    private fun clearTerminal() {
+        output.setText("", TextView.BufferType.EDITABLE)
+        appendTerminal(prompt())
+    }
+
+    /** Prompt no estilo do Termux: `nodesphere:~/projeto$ `. */
+    private fun prompt(): String {
+        val session = shell ?: return "nodesphere:~$ "
+        val current = session.directory.absolutePath
+        val home = runtime.home.absolutePath
+        val root = project.absolutePath
+        val shown = when {
+            current == home -> "~"
+            current == root -> project.name
+            current.startsWith(root + File.separator) ->
+                project.name + "/" + current.removePrefix(root + File.separator)
+            current.startsWith(home + File.separator) -> "~/" + current.removePrefix(home + File.separator)
+            else -> current
+        }
+        return "\u001b[38;5;114mnodesphere:$shown\u001b[0m$ "
+    }
+
+    private fun sendCommand(raw: String) {
+        val line = raw.trim()
+        if (line.isEmpty()) return
+        val session = shell ?: return
+        when (line) {
+            "clear", "cls" -> {
+                clearTerminal()
+                return
+            }
+            "help" -> {
+                appendTerminal(prompt() + line + "\n")
+                appendTerminal(HELP)
+                appendTerminal(prompt())
+                return
+            }
+            "runtime" -> {
+                appendTerminal(prompt() + line + "\n")
+                Thread {
+                    val report = runtime.diagnostics()
+                    main.runOnUiThread {
+                        if (!isAdded) return@runOnUiThread
+                        appendTerminal(report + "\n")
+                        appendTerminal(prompt())
+                    }
+                }.start()
+                return
+            }
+        }
+        if (!session.isOpen && !session.start()) return
+        appendTerminal(prompt() + line + "\n")
+        session.send(line)
+    }
+
+    private fun insert(text: String) {
+        val editable = command.editableText ?: return
+        val start = maxOf(0, command.selectionStart)
+        editable.insert(start, text)
+        command.setSelection(minOf(command.length(), start + text.length))
+    }
+
+    private fun history(step: Int) {
+        val session = shell ?: return
+        val items = session.history
+        if (items.isEmpty()) return
+        historyIndex = (historyIndex + step).coerceIn(-1, items.size - 1)
+        val value = if (historyIndex < 0) "" else items[items.size - 1 - historyIndex]
+        command.setText(value)
+        command.setSelection(command.length())
+    }
+
+    private fun interrupt() {
+        val session = shell ?: return
+        if (!session.isOpen) return
+        session.interrupt()
+    }
+
+    private fun stopShell() {
+        val session = shell ?: return
+        if (!session.isOpen) {
+            appendTerminal("\n[ shell já está parado ]\n")
+            return
+        }
+        session.close("Shell encerrado")
+    }
+
+    private fun toggleTerminal() {
+        panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        if (panel.visibility == View.VISIBLE) {
+            terminalScroll.post { terminalScroll.fullScroll(View.FOCUS_DOWN) }
+        }
+    }
+
+    // ---- execução -----------------------------------------------------------
+
+    private fun runProject() {
+        if (!runtime.isNodeInstalled()) {
+            offerNode()
+            return
+        }
+        val entry = entryScript()
+        if (entry == null) {
+            main.message("Nenhum arquivo JavaScript encontrado para executar")
+            return
+        }
+        panel.visibility = View.VISIBLE
+        sendCommand("node " + quote(entry.name))
+    }
+
+    private fun npmInstall() {
+        if (!runtime.isNodeInstalled()) {
+            offerNode()
+            return
+        }
+        if (!runtime.isNpmInstalled()) {
+            val message = "O npm ainda não está instalado.\n\n" +
+                "Abra Plugins → npm para baixá-lo do registry oficial."
+            AlertDialog.Builder(main)
+                .setTitle("npm ausente")
+                .setMessage(message)
+                .setPositiveButton("Abrir Plugins") { _, _ -> main.show(PluginsFragment()) }
+                .setNegativeButton("Fechar", null)
+                .show()
+            return
+        }
+        panel.visibility = View.VISIBLE
+        sendCommand("npm install")
+    }
+
+    private fun offerNode() {
+        AlertDialog.Builder(main)
+            .setTitle("Node.js não instalado")
+            .setMessage(
+                "O aplicativo procura o runtime em ${runtime.bin.absolutePath}/node.\n\n" +
+                    "Instale em Plugins → Node.js (importar executável, .zip ou .tar.gz) ou " +
+                    "empacote um binário no APK em jniLibs/<abi>/libnode.so."
+            )
+            .setPositiveButton("Abrir Plugins") { _, _ -> main.show(PluginsFragment()) }
+            .setNegativeButton("Fechar", null)
+            .show()
+    }
+
+    private fun entryScript(): File? {
+        val mainField = try {
+            val manifest = File(project, "package.json")
+            if (manifest.isFile) {
+                JSONObject(MainActivity.read(manifest)).optString("main", "").trim()
+            } else {
+                ""
+            }
+        } catch (_: Exception) {
+            ""
+        }
+        if (mainField.isNotEmpty()) {
+            val candidate = File(project, mainField)
+            if (candidate.isFile) return candidate
+        }
+        return listOf("server.js", "index.js", "main.js", "app.js", "index.mjs")
+            .map { File(project, it) }
+            .firstOrNull { it.isFile }
+    }
+
+    private fun quote(name: String): String =
+        if (name.any { it == ' ' || it == '\'' }) "'" + name.replace("'", "'\\''") + "'" else name
+
+    // ---- arquivos -----------------------------------------------------------
+
+    private fun failure(error: Exception): View = LinearLayout(requireContext()).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        setPadding(32, 32, 32, 32)
+        addView(TextView(context).apply {
+            text = "Não foi possível carregar o editor.\n${error.message ?: error.javaClass.simpleName}"
+            setTextColor(0xfff4f5ff.toInt())
+            textSize = 16f
+        })
+        addView(TextView(context).apply {
+            text = "Voltar aos projetos"
+            setTextColor(0xffb9aaff.toInt())
+            textSize = 16f
+            setPadding(0, 24, 0, 0)
+            setOnClickListener {
+                (activity as? MainActivity)?.show(ProjectsFragment())
+            }
+        })
+    }
+
+    private fun defaultFile(directory: File): File? = try {
         val preferred = listOf("server.js", "index.js", "main.js", "index.html", "README.md", "package.json")
         preferred.asSequence()
             .map { File(directory, it) }
@@ -314,9 +563,9 @@ class IdeFragment : Fragment() {
             redo.clear()
             if (!opened.contains(canonical)) opened.add(canonical)
             renderTabs()
-        } catch (e: Exception) {
+        } catch (error: Exception) {
             loading = false
-            main.message("Não foi possível abrir o arquivo: ${e.message ?: e.javaClass.simpleName}")
+            main.message("Não foi possível abrir o arquivo: ${error.message ?: error.javaClass.simpleName}")
         }
     }
 
@@ -337,8 +586,8 @@ class IdeFragment : Fragment() {
             saved = content
             dirty = false
             true
-        } catch (e: IOException) {
-            main.message("Erro ao salvar: ${e.message}")
+        } catch (error: IOException) {
+            main.message("Erro ao salvar: ${error.message}")
             false
         }
     }
@@ -358,8 +607,8 @@ class IdeFragment : Fragment() {
                     MainActivity.write(file, "")
                     refreshTree()
                     openFile(file)
-                } catch (e: IOException) {
-                    main.message(e.message ?: "Falha ao criar arquivo")
+                } catch (error: IOException) {
+                    main.message(error.message ?: "Falha ao criar arquivo")
                 }
             }
             .setNegativeButton("Cancelar", null)
@@ -373,10 +622,11 @@ class IdeFragment : Fragment() {
             .setView(input)
             .setPositiveButton("Buscar") { _, _ ->
                 val query = input.text.toString()
+                if (query.isEmpty()) return@setPositiveButton
                 val content = editor.text.toString()
                 var index = content.indexOf(query, maxOf(0, editor.selectionEnd))
                 if (index < 0) index = content.indexOf(query)
-                if (index >= 0 && query.isNotEmpty()) {
+                if (index >= 0) {
                     editor.requestFocus()
                     editor.setSelection(index, index + query.length)
                 } else {
@@ -388,19 +638,31 @@ class IdeFragment : Fragment() {
     }
 
     private fun settings() {
-        val prefs = main.getPreferences(Context.MODE_PRIVATE)
-        val enabled = prefs.getBoolean("autocomplete", false)
+        val preferences = main.getPreferences(Context.MODE_PRIVATE)
+        val options = arrayOf("Números de linha", "Autocompletar palavras-chave")
+        val checked = booleanArrayOf(
+            preferences.getBoolean(PREF_LINE_NUMBERS, true),
+            preferences.getBoolean(PREF_AUTOCOMPLETE, false)
+        )
         AlertDialog.Builder(main)
             .setTitle("Editor")
-            .setMultiChoiceItems(arrayOf("Autocompletar palavras-chave"), booleanArrayOf(enabled)) { _, _, checked ->
-                prefs.edit().putBoolean("autocomplete", checked).apply()
-                editor.setCompletionEnabled(checked)
+            .setMultiChoiceItems(options, checked) { _, which, value ->
+                when (which) {
+                    0 -> {
+                        preferences.edit().putBoolean(PREF_LINE_NUMBERS, value).apply()
+                        editor.setLineNumbersEnabled(value)
+                    }
+                    else -> {
+                        preferences.edit().putBoolean(PREF_AUTOCOMPLETE, value).apply()
+                        editor.setCompletionEnabled(value)
+                    }
+                }
             }
             .setPositiveButton("Fechar", null)
             .show()
     }
 
-    private fun history(from: ArrayDeque<String>, to: ArrayDeque<String>) {
+    private fun step(from: ArrayDeque<String>, to: ArrayDeque<String>) {
         if (from.isEmpty() || currentFile == null) return
         to.push(editor.text.toString())
         val content = from.pop()
@@ -412,80 +674,9 @@ class IdeFragment : Fragment() {
         dirty = content != saved
     }
 
-    @Synchronized
-    private fun stopShell() {
-        try {
-            shellInput?.close()
-        } catch (_: IOException) {
-        }
-        shell?.destroy()
-        shell?.let { process ->
-            if (process.isAlive) process.destroyForcibly()
-        }
-        shell = null
-        shellInput = null
-        appendTerminal("\n[Shell encerrado]\n")
-    }
-
-    private fun appendTerminal(value: String) {
-        if (!isAdded || view == null || !this::output.isInitialized) return
-        output.append(value)
-        val text = output.text
-        if (text.length > MAX_TERMINAL_CHARS) {
-            output.text = text.subSequence(text.length - MAX_TERMINAL_CHARS, text.length)
-        }
-        val scroll = view?.findViewById<android.widget.ScrollView>(R.id.terminalScroll)
-        scroll?.post { scroll.fullScroll(View.FOCUS_DOWN) }
-    }
-
-    private fun runShell(cmd: String) {
-        if (!save()) return
-        panel.visibility = View.VISIBLE
-        appendTerminal("\n\$ $cmd\n")
-        try {
-            val process = shell
-            if (process == null || !process.isAlive) {
-                val started = ProcessBuilder("/system/bin/sh")
-                    .directory(project)
-                    .redirectErrorStream(true)
-                    .start()
-                shell = started
-                shellInput = BufferedWriter(OutputStreamWriter(started.outputStream))
-                Thread {
-                    try {
-                        val buffer = CharArray(1024)
-                        InputStreamReader(started.inputStream).use { reader ->
-                            var count = reader.read(buffer)
-                            while (count != -1) {
-                                val chunk = String(buffer, 0, count)
-                                main.runOnUiThread { appendTerminal(chunk) }
-                                count = reader.read(buffer)
-                            }
-                        }
-                        val code = started.waitFor()
-                        main.runOnUiThread {
-                            if (isAdded && view != null) {
-                                appendTerminal("\n[Shell saiu: $code]\n")
-                                refreshTree()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        main.runOnUiThread { appendTerminal("\nErro: ${e.message}\n") }
-                    }
-                }.start()
-            }
-            shellInput?.apply {
-                write(cmd)
-                newLine()
-                flush()
-            }
-        } catch (e: IOException) {
-            appendTerminal("Erro: ${e.message}\n")
-        }
-    }
-
     override fun onDestroyView() {
-        stopShell()
+        shell?.close("Shell encerrado")
+        shell = null
         super.onDestroyView()
     }
 
@@ -496,10 +687,27 @@ class IdeFragment : Fragment() {
 
     companion object {
         private const val ARG_OPEN_TERMINAL = "open_terminal"
+        private const val PREF_AUTOCOMPLETE = "autocomplete"
+        private const val PREF_LINE_NUMBERS = "line_numbers"
         private const val MAX_TERMINAL_CHARS = 200_000
+
         private val TEXT_EXTENSIONS = setOf(
             "js", "mjs", "cjs", "ts", "tsx", "jsx", "html", "css", "json", "md", "txt", "xml", "yml", "yaml"
         )
+
+        private val HELP = """
+            |Comandos do NodeSphere:
+            |  help              esta ajuda
+            |  runtime           estado do Node.js/npm e caminhos
+            |  clear             limpa a tela
+            |  node -v           versão do Node.js (se instalado)
+            |  npm install       instala dependências do projeto
+            |  exit              encerra o shell
+            |
+            |O ambiente usa PREFIX em files/usr (bin, lib) e PATH com node/npm.
+            |Sem PTY não há Ctrl+C real, tela cheia nem programas interativos de tela.
+            |
+        """.trimMargin()
 
         fun newInstance(openTerminal: Boolean = false) = IdeFragment().apply {
             arguments = Bundle().apply { putBoolean(ARG_OPEN_TERMINAL, openTerminal) }
