@@ -76,7 +76,11 @@ class ProjectsFragment : Fragment() {
         if (!this::rows.isInitialized) return
         files.clear()
         try {
-            val all = main.projects().listFiles().orEmpty()
+            val projectsDir = main.projects()
+            if (!projectsDir.exists()) {
+                projectsDir.mkdirs()
+            }
+            val all = projectsDir.listFiles().orEmpty()
             all.sortBy { it.name.lowercase(Locale.ROOT) }
             val query = filter.lowercase(Locale.ROOT)
             for (file in all) {
@@ -87,7 +91,7 @@ class ProjectsFragment : Fragment() {
             rows.set(files)
         } catch (error: Exception) {
             rows.set(emptyList())
-            main.message("Não foi possível carregar os projetos: ${error.message}")
+            main.message("Não foi possível carregar os projetos: ${error.message ?: error.javaClass.simpleName}")
         }
     }
 
@@ -173,12 +177,16 @@ class ProjectsFragment : Fragment() {
             .setView(input)
             .setPositiveButton("Importar") { _, _ ->
                 val value = input.text.toString().trim()
-                if (!ProjectScaffolder.isValidName(value) || File(main.projects(), value).exists()) {
+                val projectsDir = main.projects()
+                if (!projectsDir.exists()) {
+                    projectsDir.mkdirs()
+                }
+                if (!ProjectScaffolder.isValidName(value) || File(projectsDir, value).exists()) {
                     main.message("Nome inválido ou já existente")
                     return@setPositiveButton
                 }
-                val destination = File(main.projects(), value)
-                if (!destination.mkdir()) {
+                val destination = File(projectsDir, value)
+                if (!destination.exists() && !destination.mkdirs()) {
                     main.message("Não foi possível criar pasta")
                     return@setPositiveButton
                 }
@@ -251,12 +259,16 @@ class ProjectsFragment : Fragment() {
             .setPositiveButton("Clonar") { _, _ ->
                 val remote = url.text.toString().trim()
                 val localName = name.text.toString().trim()
-                val destination = File(main.projects(), localName)
+                val projectsDir = main.projects()
+                if (!projectsDir.exists()) {
+                    projectsDir.mkdirs()
+                }
+                val destination = File(projectsDir, localName)
                 if (!remote.startsWith("https://") || !ProjectScaffolder.isValidName(localName) || destination.exists()) {
                     main.message("URL HTTPS ou nome inválido, ou projeto existente")
                     return@setPositiveButton
                 }
-                if (!destination.mkdir()) {
+                if (!destination.exists() && !destination.mkdirs()) {
                     main.message("Não foi possível criar pasta")
                     return@setPositiveButton
                 }

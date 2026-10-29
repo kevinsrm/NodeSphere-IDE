@@ -3,6 +3,7 @@ package com.mobile.nodeide
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -54,7 +55,18 @@ class MainActivity : AppCompatActivity() {
         bootstrapRuntime()
 
         if (savedInstanceState != null) {
-            savedInstanceState.getString(KEY_PROJECT)?.let { project = File(it) }
+            savedInstanceState.getString(KEY_PROJECT)?.let { path ->
+                try {
+                    val projectDir = File(path)
+                    if (!projectDir.exists()) {
+                        projectDir.mkdirs()
+                    }
+                    project = projectDir.canonicalFile
+                } catch (e: Exception) {
+                    Log.w(TAG, "Falha ao restaurar projeto: ${e.message}")
+                    project = null
+                }
+            }
             selectedDestination = savedInstanceState.getInt(KEY_DESTINATION, R.id.nav_projects)
         }
 
@@ -125,23 +137,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Prepara o prefixo do runtime e, quando o APK traz um executável de Node em
-     * `jniLibs/<abi>/libnode.so`, instala o Node e baixa o npm em segundo plano.
+     * Prepara o prefixo do runtime e extrai automaticamente o Node.js embutido
+     * no APK (assets/node/node) para files/usr/bin/node com permissão de execução.
      */
     private fun bootstrapRuntime() {
         if (bootstrapped) return
         bootstrapped = true
-        Thread({
-            try {
-                runtime.prepare()
-                if (!runtime.installBundled()) runtime.installFromAssets()
-                if (runtime.isNodeInstalled() && !runtime.isNpmInstalled()) {
-                    runtime.installNpm()
-                }
-            } catch (error: Exception) {
-                android.util.Log.w("NodeSphere", "Bootstrap do runtime: ${error.message}")
-            }
-        }, "nodesphere-runtime").start()
+        BootstrapManager.initialize(this, runtime) { success ->
+            Log.i(TAG, "Bootstrap do runtime finalizado (Node presente: $success)")
+        }
     }
 
     private fun selectDestination(destination: Int) {
@@ -161,7 +165,13 @@ class MainActivity : AppCompatActivity() {
     /** Abre o projeto no editor e, opcionalmente, deixa o terminal visível. */
     fun openProject(directory: File, openTerminal: Boolean = false) {
         try {
-            val canonical = directory.canonicalFile
+            if (!directory.exists()) {
+                directory.mkdirs()
+            }
+            val canonical = try { directory.canonicalFile } catch (_: Exception) { directory }
+            if (!canonical.exists()) {
+                canonical.mkdirs()
+            }
             if (!canonical.isDirectory || !canonical.canRead()) {
                 message("A pasta do projeto não está disponível ou não pode ser lida")
                 show(ProjectsFragment())
@@ -181,10 +191,7 @@ class MainActivity : AppCompatActivity() {
         if (!workspace.exists() && !workspace.mkdirs()) {
             throw IOException("Não foi possível preparar o workspace do terminal")
         }
-        if (!workspace.isDirectory || !workspace.canWrite()) {
-            throw IOException("O workspace do terminal não pode ser usado")
-        }
-        return workspace.canonicalFile
+        return try { workspace.canonicalFile } catch (_: Exception) { workspace }
     }
 
     /** Diretório privado onde os projetos ficam armazenados. */
@@ -193,10 +200,7 @@ class MainActivity : AppCompatActivity() {
         if (!directory.exists() && !directory.mkdirs()) {
             throw IOException("Não foi possível criar a pasta de projetos")
         }
-        if (!directory.isDirectory) {
-            throw IOException("O caminho de projetos não é uma pasta")
-        }
-        return directory
+        return try { directory.canonicalFile } catch (_: Exception) { directory }
     }
 
     fun message(text: String) {
@@ -204,6 +208,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val TAG = "MainActivity"
+
         @Volatile
         private var bootstrapped = false
 

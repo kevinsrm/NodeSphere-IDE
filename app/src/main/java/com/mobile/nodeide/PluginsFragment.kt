@@ -1,8 +1,6 @@
 package com.mobile.nodeide
 
-import android.net.Uri
 import android.os.Bundle
-import android.provider.OpenableColumns
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
@@ -12,7 +10,6 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -21,10 +18,8 @@ import java.io.IOException
 import java.util.Locale
 
 /**
- * Catálogo de integrações. As ações de Node.js e npm instalam o runtime de
- * verdade no prefixo do aplicativo (`files/usr`), sem simulação: um executável
- * de Node importado passa a responder a `node -v` no terminal e o npm é baixado
- * do registry oficial.
+ * Catálogo de integrações. O Node.js vem embutido nativamente no APK (ARM64 Bionic),
+ * garantindo extração automática e execução sem dependência de downloads externos.
  */
 class PluginsFragment : Fragment() {
 
@@ -32,10 +27,6 @@ class PluginsFragment : Fragment() {
     private lateinit var rows: PluginRows
     private lateinit var list: RecyclerView
     private var query = ""
-
-    private val importer = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        importNode(uri)
-    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -100,9 +91,9 @@ class PluginsFragment : Fragment() {
                 description = if (node) {
                     "Runtime ativo em files/usr/bin/node (Bionic); node, npm e npx já funcionam no terminal."
                 } else {
-                    "Runtime JavaScript para Android: importe um binário Bionic (.zip, .tar.gz ou node)."
+                    "Runtime JavaScript ARM64 Bionic embutido no APK; pronto para executar scripts e projetos no terminal."
                 },
-                status = if (node) "INSTALADO" else "PRONTO PARA INSTALAR",
+                status = if (node) "INSTALADO" else "EMBUTIDO NO APK",
                 action = if (node) "Gerenciar" else "Instalar",
                 icon = R.drawable.ic_nodejs,
                 accent = 0xff55b85a.toInt()
@@ -187,20 +178,16 @@ class PluginsFragment : Fragment() {
     private fun nodeDialog() {
         val runtime = main.runtime
         val options = arrayOf(
-            if (runtime.isNodeInstalled()) "Importar outro executável" else "Importar executável (.zip, .tar.gz, node)",
-            "Baixar de uma URL",
-            "Usar o Node empacotado no APK",
+            if (runtime.isNodeInstalled()) "Reinstalar / Restaurar Node embutido" else "Instalar Node.js embutido",
             "Diagnóstico do runtime",
             if (runtime.isNodeInstalled()) "Remover instalação" else "Como funciona?"
         )
         AlertDialog.Builder(main)
-            .setTitle("Node.js")
+            .setTitle("Node.js (Embutido)")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> importer.launch(arrayOf("*/*"))
-                    1 -> urlDialog()
-                    2 -> bundledNode()
-                    3 -> details("Diagnóstico", runtime.diagnostics())
+                    0 -> restoreBundledNode()
+                    1 -> details("Diagnóstico", runtime.diagnostics())
                     else -> {
                         if (runtime.isNodeInstalled()) removeNode() else explainNode()
                     }
@@ -212,22 +199,16 @@ class PluginsFragment : Fragment() {
 
     private fun explainNode() {
         details(
-            "Como instalar o Node.js",
-            "O NodeSphere não simula apt/dpkg: o foco é rodar projetos Node.js e npm install.\n\n" +
-                "1. Importar executável: aceita um binário `node` de Android (Bionic), " +
-                ".zip ou .tar.gz com bin/node e as bibliotecas. Binários de nodejs.org " +
-                "(glibc) são recusados com explicação.\n" +
-                "2. Baixar de uma URL direta para um runtime Android.\n" +
-                "3. Empacotar em assets/node/ ou jniLibs/<abi>/libnode.so (o app extrai sozinho).\n\n" +
-                "O runtime fica em ${main.runtime.bin.absolutePath} e entra no PATH do terminal.\n" +
-                "O comando `runtime` mostra ABI, interpretador ELF, OPENSSL_CONF e SSL_CERT_FILE efetivos."
+            "Node.js Embutido",
+            "O NodeSphere traz o Node.js embutido diretamente no APK (ARM64 Bionic) para funcionamento Plug and Play sem downloads externos.\n\n" +
+                "O binário é extraído automaticamente para ${main.runtime.bin.absolutePath}/node com permissões de execução e adicionado ao PATH do terminal."
         )
     }
 
     private fun removeNode() {
         AlertDialog.Builder(main)
             .setTitle("Remover Node.js")
-            .setMessage("O executável e o npm instalados em files/usr serão apagados.")
+            .setMessage("O executável e o npm instalados em files/usr serão apagados. Você poderá restaurá-los a qualquer momento.")
             .setPositiveButton("Remover") { _, _ ->
                 val runtime = main.runtime
                 runtime.prefix.deleteRecursively()
@@ -239,57 +220,16 @@ class PluginsFragment : Fragment() {
             .show()
     }
 
-    private fun bundledNode() {
-        work("Empacotado no APK") {
-            if (main.runtime.installBundled()) return@work "Node.js do APK (jniLibs) instalado"
-            if (main.runtime.installFromAssets(force = true)) return@work "Node.js de assets/node instalado"
-            throw IOException(
-                "Este APK não tem Node empacotado. Coloque um .zip/.tar.gz com um node " +
-                    "Bionic em app/src/main/assets/node/ ou copie um executável para " +
-                    "app/src/main/jniLibs/<abi>/libnode.so e gere o APK novamente."
-            )
-        }
-    }
-
-    private fun importNode(uri: Uri?) {
-        if (uri == null) return
-        val context = requireContext()
-        val name = displayName(uri)
-        work("Instalando Node.js") { progress ->
-            val input = context.contentResolver.openInputStream(uri)
-                ?: throw IOException("Não foi possível abrir o arquivo escolhido")
-            main.runtime.installFrom(input, name, progress)
-        }
-    }
-
-    private fun urlDialog() {
-        val input = EditText(main).apply {
-            hint = "https://.../node.tar.gz"
-            setSingleLine()
-        }
-        AlertDialog.Builder(main)
-            .setTitle("Baixar Node.js")
-            .setMessage("Informe uma URL direta para um executável, .zip ou .tar.gz de Node para Android.")
-            .setView(input)
-            .setPositiveButton("Baixar") { _, _ ->
-                val url = input.text.toString().trim()
-                if (url.isEmpty()) return@setPositiveButton
-                work("Baixando Node.js") { progress -> main.runtime.installNodeFromUrl(url, progress) }
+    private fun restoreBundledNode() {
+        work("Instalando Node.js embutido") { progress ->
+            progress("Extraindo Node.js dos assets do APK…")
+            val success = BootstrapManager.installNodeIfNeeded(main, main.runtime, force = true)
+            if (success) {
+                "Node.js embutido instalado com sucesso"
+            } else {
+                throw IOException("Não foi possível extrair o binário do Node.js.")
             }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    private fun displayName(uri: Uri): String {
-        var name = "arquivo"
-        try {
-            main.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (index >= 0 && cursor.moveToFirst()) name = cursor.getString(index) ?: name
-            }
-        } catch (_: Exception) {
         }
-        return name
     }
 
     // ---- npm ----------------------------------------------------------------
@@ -303,7 +243,7 @@ class PluginsFragment : Fragment() {
                     "O npm é JavaScript puro e roda sobre o Node.js. Instale o Node.js primeiro; " +
                         "depois o npm é baixado do registry oficial."
                 )
-                .setPositiveButton("Instalar Node.js") { _, _ -> nodeDialog() }
+                .setPositiveButton("Instalar Node.js") { _, _ -> restoreBundledNode() }
                 .setNegativeButton("Fechar", null)
                 .show()
             return

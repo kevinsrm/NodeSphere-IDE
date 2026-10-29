@@ -241,9 +241,7 @@ class NodeRuntime(context: Context) {
         if (interpreter != null && !interpreter.startsWith(BIONIC_PREFIX)) {
             throw IOException(
                 "Este `node` é de Linux glibc (interpretador $interpreter), não roda no Android: " +
-                    "o sistema usa Bionic ($BIONIC_PREFIX). Importe um `node` compilado para " +
-                    "Android (por exemplo, o binário de um Termux já instalado no aparelho) " +
-                    "em Plugins → Node.js → Importar executável."
+                    "o sistema usa Bionic ($BIONIC_PREFIX)."
             )
         }
         val expected = expectedMachine()
@@ -267,7 +265,10 @@ class NodeRuntime(context: Context) {
      * do APK sem depender de rede na primeira abertura.
      */
     fun installFromAssets(force: Boolean = false, progress: (String) -> Unit = {}): Boolean {
-        if (!force && isNodeInstalled()) return false
+        if (!force && isNodeInstalled()) {
+            makeExecutable(nodeFile)
+            return true
+        }
         val names = try {
             app.assets.list(ASSETS_NODE)?.toList() ?: emptyList()
         } catch (error: Exception) {
@@ -281,7 +282,28 @@ class NodeRuntime(context: Context) {
         }
         if (candidates.isEmpty()) return false
         prepare()
+
+        // Prioridade para o binário direto 'node'
+        if (candidates.contains("node")) {
+            val temporary = File(tmp, "asset-node")
+            try {
+                progress("Extraindo Node.js do APK…")
+                app.assets.open("$ASSETS_NODE/node").use { input ->
+                    FileOutputStream(temporary).use { output -> input.copyTo(output) }
+                }
+                installBinary(temporary)
+                makeExecutable(nodeFile)
+                Log.i(TAG, "Runtime instalado a partir de assets/node")
+                return true
+            } catch (error: Exception) {
+                Log.w(TAG, "assets/node ignorado: ${error.message}")
+            } finally {
+                temporary.delete()
+            }
+        }
+
         for (name in candidates.sorted()) {
+            if (name == "node") continue
             val temporary = File(tmp, "asset-$name")
             try {
                 progress("Extraindo $name do APK…")
@@ -289,6 +311,7 @@ class NodeRuntime(context: Context) {
                     FileOutputStream(temporary).use { output -> input.copyTo(output) }
                 }
                 installFile(temporary, progress)
+                makeExecutable(nodeFile)
                 writeLaunchers()
                 Log.i(TAG, "Runtime instalado a partir de assets/$name")
                 return true
@@ -830,7 +853,7 @@ class NodeRuntime(context: Context) {
         }
     }
 
-    private fun makeExecutable(file: File) {
+    fun makeExecutable(file: File) {
         file.setReadable(true, false)
         file.setWritable(true, true)
         file.setExecutable(true, false)

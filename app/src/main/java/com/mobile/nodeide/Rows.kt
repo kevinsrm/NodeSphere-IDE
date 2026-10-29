@@ -2,6 +2,7 @@ package com.mobile.nodeide
 
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.util.Log
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
@@ -12,9 +13,13 @@ class Rows(private val click: (Int) -> Unit) : RecyclerView.Adapter<Rows.Holder>
     private val items = mutableListOf<String>()
 
     fun set(data: List<String>) {
-        items.clear()
-        items.addAll(data)
-        notifyDataSetChanged()
+        try {
+            items.clear()
+            items.addAll(data)
+            notifyDataSetChanged()
+        } catch (e: Exception) {
+            Log.e("Rows", "Erro ao atualizar dados: ${e.message}")
+        }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
@@ -43,10 +48,22 @@ class Rows(private val click: (Int) -> Unit) : RecyclerView.Adapter<Rows.Holder>
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
-        holder.text.text = items[position]
-        holder.text.setOnClickListener {
-            val current = holder.bindingAdapterPosition
-            if (current != RecyclerView.NO_POSITION) click(current)
+        try {
+            if (position in items.indices) {
+                holder.text.text = items[position]
+                holder.text.setOnClickListener {
+                    val current = holder.bindingAdapterPosition
+                    if (current != RecyclerView.NO_POSITION && current in items.indices) {
+                        try {
+                            click(current)
+                        } catch (e: Exception) {
+                            Log.e("Rows", "Erro ao executar clique no item: ${e.message}")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("Rows", "Erro em onBindViewHolder: ${e.message}")
         }
     }
 

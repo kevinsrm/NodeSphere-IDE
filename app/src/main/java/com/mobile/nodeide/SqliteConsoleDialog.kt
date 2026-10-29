@@ -23,6 +23,9 @@ internal object SqliteConsoleDialog {
     private val queryPattern = Regex("^\\s*(SELECT|PRAGMA|WITH|EXPLAIN)\\b", RegexOption.IGNORE_CASE)
 
     fun show(activity: Activity, project: File) {
+        if (!project.exists()) {
+            project.mkdirs()
+        }
         val databaseFile = File(project, "nodesphere.sqlite")
         val content = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL

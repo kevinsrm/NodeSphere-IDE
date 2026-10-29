@@ -32,9 +32,13 @@ class PluginRows(private val onAction: (String) -> Unit) : RecyclerView.Adapter<
     private var density = 1f
 
     fun set(cards: List<PluginCard>) {
-        items.clear()
-        items.addAll(cards)
-        notifyDataSetChanged()
+        try {
+            items.clear()
+            items.addAll(cards)
+            notifyDataSetChanged()
+        } catch (e: Exception) {
+            android.util.Log.e("PluginRows", "Erro ao atualizar plugins: ${e.message}")
+        }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
@@ -148,27 +152,40 @@ class PluginRows(private val onAction: (String) -> Unit) : RecyclerView.Adapter<
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
-        val item = items[position]
-        holder.title.text = item.name
-        holder.description.text = item.description
-        holder.status.text = item.status.uppercase()
-        holder.icon.setImageResource(item.icon)
-        holder.badge.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(holder.badge, 15).toFloat()
-            setColor(item.accent)
+        try {
+            if (position in items.indices) {
+                val item = items[position]
+                holder.title.text = item.name
+                holder.description.text = item.description
+                holder.status.text = item.status.uppercase()
+                holder.icon.setImageResource(item.icon)
+                holder.badge.background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(holder.badge, 15).toFloat()
+                    setColor(item.accent)
+                }
+                holder.status.setTextColor(item.accent)
+                holder.status.background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp(holder.status, 20).toFloat()
+                    setColor(withAlpha(item.accent, 30))
+                    setStroke(dp(holder.status, 1), withAlpha(item.accent, 86))
+                }
+                holder.action.text = item.action
+                holder.action.setStrokeColor(ColorStateList.valueOf(withAlpha(item.accent, 180)))
+                val clickAction = {
+                    try {
+                        onAction(item.id)
+                    } catch (e: Exception) {
+                        android.util.Log.e("PluginRows", "Erro ao executar ação do plugin: ${e.message}")
+                    }
+                }
+                holder.action.setOnClickListener { clickAction() }
+                holder.card.setOnClickListener { clickAction() }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("PluginRows", "Erro em onBindViewHolder: ${e.message}")
         }
-        holder.status.setTextColor(item.accent)
-        holder.status.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(holder.status, 20).toFloat()
-            setColor(withAlpha(item.accent, 30))
-            setStroke(dp(holder.status, 1), withAlpha(item.accent, 86))
-        }
-        holder.action.text = item.action
-        holder.action.setStrokeColor(ColorStateList.valueOf(withAlpha(item.accent, 180)))
-        holder.action.setOnClickListener { onAction(item.id) }
-        holder.card.setOnClickListener { onAction(item.id) }
     }
 
     override fun getItemCount(): Int = items.size
