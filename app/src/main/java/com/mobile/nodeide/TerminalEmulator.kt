@@ -1,7 +1,5 @@
 package com.mobile.nodeide
 
-import java.util.ArrayDeque
-
 /**
  * Estado de estilo corrente de um terminal (equivalente ao SGR ativo).
  */
@@ -153,16 +151,8 @@ class TerminalEmulator(initialColumns: Int = 80, initialRows: Int = 24) {
 
     fun screenRow(index: Int): TerminalRow? = screen.getOrNull(index)
 
-    /** Linha do histórico; `0` é a mais antiga disponível. */
-    fun scrollbackRow(index: Int): TerminalRow? {
-        if (index < 0 || index >= history.size) return null
-        var position = 0
-        for (row in history) {
-            if (position == index) return row
-            position++
-        }
-        return null
-    }
+    /** Linha do histórico; `0` é a mais antiga disponível. Acesso O(1). */
+    fun scrollbackRow(index: Int): TerminalRow? = history.getOrNull(index)
 
     fun clear() {
         screen.clear()

@@ -157,6 +157,7 @@ class IdeFragment : Fragment() {
             button(keys, "^D") { terminal.type("\u0004") }
             button(keys, "⏎") { terminal.type("\r") }
             button(keys, "clear") { session?.clearScreen() }
+            button(keys, "⧉ Copiar") { terminal.copySelectionOrAll() }
             button(keys, "⌨") { terminal.focusTerminal() }
             button(keys, "|") { terminal.type("|") }
             button(keys, ">") { terminal.type(">") }
@@ -318,9 +319,9 @@ class IdeFragment : Fragment() {
             .setTitle("Node.js não instalado")
             .setMessage(
                 "O aplicativo procura o runtime em ${runtime.bin.absolutePath}/node.\n\n" +
-                    "Instale em Plugins → Node.js → Instalar do Termux (binário Bionic, " +
-                    "o único que executa no Android) ou importe o `node` de um Termux " +
-                    "instalado no aparelho. Binários de nodejs.org são glibc e não rodam."
+                    "Importe em Plugins → Node.js → Importar executável um `node` " +
+                    "compilado para Android (Bionic) — por exemplo, o binário de um " +
+                    "Termux instalado no aparelho. Binários de nodejs.org são glibc e não rodam."
             )
             .setPositiveButton("Abrir Plugins") { _, _ -> main.show(PluginsFragment()) }
             .setNegativeButton("Fechar", null)

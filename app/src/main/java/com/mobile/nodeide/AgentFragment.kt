@@ -337,12 +337,14 @@ class AgentFragment : Fragment() {
                 val command = arguments.getString("command")
                 val capture = File.createTempFile("agent", ".log", main.cacheDir)
                 try {
-                    val builder = ProcessBuilder("/system/bin/sh", "-c", command)
-                    builder.directory(root)
+                    // Mesmo ambiente do terminal (incluindo OPENSSL_CONF/SSL_CERT_FILE)
+                    // e diretório de trabalho fixo na raiz do projeto ativo.
+                    val builder = main.runtime.processBuilder(
+                        listOf("/system/bin/sh", "-c", command),
+                        root
+                    )
                     builder.redirectErrorStream(true)
                     builder.redirectOutput(capture)
-                    // Mesmo ambiente do terminal: node/npm do prefixo entram no PATH.
-                    builder.environment().putAll(main.runtime.environment(root))
                     val process = builder.start()
                     if (!process.waitFor(30, TimeUnit.SECONDS)) {
                         process.destroyForcibly()

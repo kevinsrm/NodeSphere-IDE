@@ -100,7 +100,7 @@ class PluginsFragment : Fragment() {
                 description = if (node) {
                     "Runtime ativo em files/usr/bin/node (Bionic); node, npm e npx já funcionam no terminal."
                 } else {
-                    "Runtime JavaScript para Android: instale do Termux (binário Bionic) ou importe um .deb/zip/tar.gz."
+                    "Runtime JavaScript para Android: importe um binário Bionic (.zip, .tar.gz ou node)."
                 },
                 status = if (node) "INSTALADO" else "PRONTO PARA INSTALAR",
                 action = if (node) "Gerenciar" else "Instalar",
@@ -127,7 +127,7 @@ class PluginsFragment : Fragment() {
             PluginCard(
                 id = "terminal",
                 name = "Terminal",
-                description = "Shell /system/bin/sh persistente, com prompt, histórico, cores ANSI e PATH do prefixo.",
+                description = "Shell /system/bin/sh persistente na pasta do projeto, com seleção/cópia de texto, histórico, cores ANSI e PATH do prefixo.",
                 status = "INTEGRADO",
                 action = "Abrir terminal",
                 icon = R.drawable.ic_terminal,
@@ -187,8 +187,7 @@ class PluginsFragment : Fragment() {
     private fun nodeDialog() {
         val runtime = main.runtime
         val options = arrayOf(
-            "Instalar do Termux (binário Bionic)",
-            if (runtime.isNodeInstalled()) "Importar outro executável" else "Importar executável (.deb, .zip, .tar.gz, node)",
+            if (runtime.isNodeInstalled()) "Importar outro executável" else "Importar executável (.zip, .tar.gz, node)",
             "Baixar de uma URL",
             "Usar o Node empacotado no APK",
             "Diagnóstico do runtime",
@@ -198,11 +197,10 @@ class PluginsFragment : Fragment() {
             .setTitle("Node.js")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> termuxNode()
-                    1 -> importer.launch(arrayOf("*/*"))
-                    2 -> urlDialog()
-                    3 -> bundledNode()
-                    4 -> details("Diagnóstico", runtime.diagnostics())
+                    0 -> importer.launch(arrayOf("*/*"))
+                    1 -> urlDialog()
+                    2 -> bundledNode()
+                    3 -> details("Diagnóstico", runtime.diagnostics())
                     else -> {
                         if (runtime.isNodeInstalled()) removeNode() else explainNode()
                     }
@@ -212,41 +210,17 @@ class PluginsFragment : Fragment() {
             .show()
     }
 
-    /**
-     * Caminho recomendado: baixa o `nodejs` (e as dependências) do repositório
-     * do Termux, compilados contra Bionic — os binários de nodejs.org são glibc
-     * e o Android responde "No such file or directory" ao executá-los.
-     */
-    private fun termuxNode() {
-        AlertDialog.Builder(main)
-            .setTitle("Instalar do Termux")
-            .setMessage(
-                "O app vai ler o índice de pacotes do Termux (packages.termux.dev), baixar " +
-                    "o pacote nodejs e suas dependências (libc++, libandroid-support, ...) e " +
-                    "extrair tudo em ${main.runtime.prefix.absolutePath}.\n\n" +
-                    "São cerca de 40–80 MB. O npm vem junto e os comandos node/npm/npx " +
-                    "ficam no PATH do terminal."
-            )
-            .setPositiveButton("Instalar") { _, _ ->
-                work("Instalando Node.js (Termux)") { progress ->
-                    main.runtime.installTermuxNode(progress)
-                }
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
     private fun explainNode() {
         details(
             "Como instalar o Node.js",
-            "1. Instalar do Termux (recomendado): baixa o pacote oficial do Node.js para " +
-                "Android (Bionic) e as bibliotecas que ele usa.\n" +
-                "2. Importar executável: aceita o .deb do nodejs, um binário node de Android, " +
-                ".zip ou .tar.gz com bin/node. Binários de nodejs.org (glibc) são recusados " +
-                "com explicação.\n" +
-                "3. Baixar de uma URL ou empacotar em assets/node/ (o app extrai sozinho).\n\n" +
+            "O NodeSphere não simula apt/dpkg: o foco é rodar projetos Node.js e npm install.\n\n" +
+                "1. Importar executável: aceita um binário `node` de Android (Bionic), " +
+                ".zip ou .tar.gz com bin/node e as bibliotecas. Binários de nodejs.org " +
+                "(glibc) são recusados com explicação.\n" +
+                "2. Baixar de uma URL direta para um runtime Android.\n" +
+                "3. Empacotar em assets/node/ ou jniLibs/<abi>/libnode.so (o app extrai sozinho).\n\n" +
                 "O runtime fica em ${main.runtime.bin.absolutePath} e entra no PATH do terminal.\n" +
-                "O comando `runtime` no terminal mostra ABI, interpretador ELF e PATH efetivos."
+                "O comando `runtime` mostra ABI, interpretador ELF, OPENSSL_CONF e SSL_CERT_FILE efetivos."
         )
     }
 
@@ -270,8 +244,8 @@ class PluginsFragment : Fragment() {
             if (main.runtime.installBundled()) return@work "Node.js do APK (jniLibs) instalado"
             if (main.runtime.installFromAssets(force = true)) return@work "Node.js de assets/node instalado"
             throw IOException(
-                "Este APK não tem Node empacotado. Coloque um .deb do nodejs (Termux) em " +
-                    "app/src/main/assets/node/ ou copie um executável para " +
+                "Este APK não tem Node empacotado. Coloque um .zip/.tar.gz com um node " +
+                    "Bionic em app/src/main/assets/node/ ou copie um executável para " +
                     "app/src/main/jniLibs/<abi>/libnode.so e gere o APK novamente."
             )
         }

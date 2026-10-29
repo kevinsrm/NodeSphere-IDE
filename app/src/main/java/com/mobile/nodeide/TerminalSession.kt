@@ -74,12 +74,12 @@ class TerminalSession(
 
     private fun openShell(showBanner: Boolean): Boolean {
         try {
-            directory.mkdirs()
-            val builder = ProcessBuilder(SHELL)
-            builder.directory(directory)
+            // O shell nasce na raiz do projeto ativo (`directory` inicial =
+            // project). O `cd` manual é acompanhado pelo marcador; os atalhos
+            // do app (Executar / npm install) forçam a volta com ensureDirectory().
+            val builder = runtime.processBuilder(listOf(SHELL), directory)
             builder.redirectErrorStream(true)
             val environment = builder.environment()
-            environment.putAll(runtime.environment(directory))
             environment["COLUMNS"] = columns.toString()
             environment["LINES"] = rows.toString()
             val started = builder.start()
@@ -219,6 +219,9 @@ class TerminalSession(
         while (history.size > MAX_HISTORY) history.removeAt(0)
         historyIndex = history.size
         executing = true
+        // Sem PTY não há SIGWINCH: reexporta o tamanho atual antes de cada
+        // comando para que `ls`/`npm` alinhem as colunas com a tela visível.
+        write("export COLUMNS=$columns LINES=$rows\n")
         write(text + "\n")
         // O marcador devolve o diretório atual e o PID do shell: com o PID dá
         // para encerrar também os filhos (um `node server.js` em execução).
@@ -519,7 +522,7 @@ class TerminalSession(
         emit("│ PREFIX ${runtime.prefix.absolutePath}\r\n")
         emit("│ node   ${if (runtime.isNodeInstalled()) "instalado" else "não instalado"}\r\n")
         emit("│ npm    ${if (runtime.isNpmInstalled()) "instalado" else "não instalado"}\r\n")
-        emit("\u001b[38;5;110m╰─ toque na tela para digitar · help lista os comandos\u001b[0m\r\n\r\n")
+        emit("\u001b[38;5;110m╰─ toque para digitar · toque longo seleciona texto · help lista os comandos\u001b[0m\r\n\r\n")
     }
 
     /** Prompt no estilo do Termux: `nodesphere:projeto/sub$ `. */
@@ -587,7 +590,9 @@ class TerminalSession(
                 "  exit  ou  ^D      encerra o shell\r\n" +
                 "\r\n" +
                 "O shell já começa na pasta do projeto, com PREFIX em files/usr,\r\n" +
-                "HOME em files/home e node/npm/npx no PATH.\r\n" +
+                "HOME em files/home, OPENSSL_CONF/SSL_CERT_FILE no prefixo do app\r\n" +
+                "e node/npm/npx no PATH.\r\n" +
+                "Toque longo no texto seleciona; a barra flutuante copia (ou use ⧉ Copiar).\r\n" +
                 "Sem PTY não existe SIGINT real: ^C reabre o shell no mesmo diretório.\r\n\r\n"
     }
 }
