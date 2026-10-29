@@ -47,4 +47,6 @@ dependencies {
     implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.0.202406032230-r")
     implementation("org.slf4j:slf4j-nop:2.0.13")
     implementation("com.google.android.material:material:1.12.0")
+    // XZ: índices Packages.xz e o data.tar.xz dos pacotes .deb do Termux.
+    implementation("org.tukaani:xz:1.9")
 }

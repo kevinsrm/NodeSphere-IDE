@@ -11,7 +11,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
@@ -39,9 +38,7 @@ class IdeFragment : Fragment() {
     private lateinit var rows: Rows
     private lateinit var tabs: LinearLayout
     private lateinit var panel: LinearLayout
-    private lateinit var output: TextView
-    private lateinit var command: EditText
-    private lateinit var terminalScroll: ScrollView
+    private lateinit var terminal: TerminalView
     private lateinit var project: File
 
     private var currentFile: File? = null
@@ -49,12 +46,11 @@ class IdeFragment : Fragment() {
     private var dirty = false
     private var saved = ""
     private var previous = ""
-    private var historyIndex = -1
     private var dragStartY = 0f
     private var dragStartHeight = 0
     private var dragging = false
 
-    private var shell: ShellSession? = null
+    private var session: TerminalSession? = null
 
     private val visible = mutableListOf<File>()
     private val visitedDirectories = mutableSetOf<String>()
@@ -86,18 +82,20 @@ class IdeFragment : Fragment() {
             tree = root.findViewById(R.id.tree)
             tabs = root.findViewById(R.id.tabs)
             panel = root.findViewById(R.id.terminalPanel)
-            output = root.findViewById(R.id.output)
-            command = root.findViewById(R.id.command)
-            terminalScroll = root.findViewById(R.id.terminalScroll)
-            output.setText("", TextView.BufferType.EDITABLE)
+            terminal = root.findViewById(R.id.terminal)
 
-            shell = ShellSession(
-                home = runtime.home,
-                environment = runtime.environment(project),
-                onOutput = { text -> appendTerminal(text) },
-                onPrompt = { appendTerminal(prompt()) },
-                onExit = { message -> appendTerminal("\n[ $message ]\n") }
+            // O shell nasce já dentro da pasta do projeto ativo e com o ambiente
+            // do prefixo (PATH/HOME/TMPDIR/NODE_PATH), então `ls`, `node` e `npm`
+            // funcionam de imediato.
+            val terminalSession = TerminalSession(
+                runtime = runtime,
+                project = project,
+                startDirectory = project,
+                output = { text -> terminal.feed(text) }
             )
+            session = terminalSession
+            terminal.onInput = { data -> terminalSession.input(data) }
+            terminal.onResized = { columns, rows -> terminalSession.resize(columns, rows) }
 
             tree.layoutManager = LinearLayoutManager(main)
             rows = Rows { position ->
@@ -147,17 +145,24 @@ class IdeFragment : Fragment() {
                 }
             }
 
+            // Teclas do terminal: mandam as mesmas sequências de um teclado real.
             val keys = root.findViewById<LinearLayout>(R.id.keys)
-            button(keys, "↑") { history(1) }
-            button(keys, "↓") { history(-1) }
-            button(keys, "^C") { interrupt() }
-            button(keys, "^D") { stopShell() }
-            button(keys, "clear") { clearTerminal() }
-            button(keys, "|") { insert("|") }
-            button(keys, ">") { insert(">") }
-            button(keys, "~") { insert("~") }
-            button(keys, "/") { insert("/") }
-            button(keys, "-") { insert("-") }
+            button(keys, "⇤") { terminal.type(ESCAPE + "[H") }
+            button(keys, "←") { terminal.type(ESCAPE + "[D") }
+            button(keys, "→") { terminal.type(ESCAPE + "[C") }
+            button(keys, "↑") { terminal.type(ESCAPE + "[A") }
+            button(keys, "↓") { terminal.type(ESCAPE + "[B") }
+            button(keys, "Tab") { terminal.type("\t") }
+            button(keys, "^C") { terminal.type("\u0003") }
+            button(keys, "^D") { terminal.type("\u0004") }
+            button(keys, "⏎") { terminal.type("\r") }
+            button(keys, "clear") { session?.clearScreen() }
+            button(keys, "⌨") { terminal.focusTerminal() }
+            button(keys, "|") { terminal.type("|") }
+            button(keys, ">") { terminal.type(">") }
+            button(keys, "~") { terminal.type("~") }
+            button(keys, "/") { terminal.type("/") }
+            button(keys, "-") { terminal.type("-") }
 
             editor.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -175,15 +180,6 @@ class IdeFragment : Fragment() {
 
                 override fun afterTextChanged(e: Editable?) = Unit
             })
-
-            root.findViewById<View>(R.id.execute).setOnClickListener {
-                val text = command.text.toString()
-                if (text.isNotBlank()) {
-                    command.setText("")
-                    historyIndex = -1
-                    sendCommand(text)
-                }
-            }
 
             val handle = root.findViewById<View>(R.id.handle)
             handle.setOnTouchListener { _, event ->
@@ -211,9 +207,10 @@ class IdeFragment : Fragment() {
                 }
             }
 
-            banner()
+            terminalSession.start()
             if (arguments?.getBoolean(ARG_OPEN_TERMINAL, false) == true) {
                 panel.visibility = View.VISIBLE
+                terminal.post { terminal.focusTerminal() }
             }
 
             requireActivity().onBackPressedDispatcher.addCallback(
@@ -236,132 +233,46 @@ class IdeFragment : Fragment() {
 
     // ---- terminal -----------------------------------------------------------
 
-    private fun banner() {
-        appendTerminal("\u001b[1m╭─ NodeSphere terminal\u001b[0m  /system/bin/sh (sem PTY)\n")
-        appendTerminal("│ PREFIX ${runtime.prefix.absolutePath}\n")
-        appendTerminal("│ node   ${if (runtime.isNodeInstalled()) "instalado" else "não instalado"}\n")
-        appendTerminal("│ npm    ${if (runtime.isNpmInstalled()) "instalado" else "não instalado"}\n")
-        appendTerminal("\u001b[38;5;110m╰─ Digite \u001b[1mhelp\u001b[0m\u001b[38;5;110m para os comandos do NodeSphere.\u001b[0m\n\n")
-        Thread {
-            val node = if (runtime.isNodeInstalled()) runtime.nodeVersion() else null
-            val npm = if (runtime.isNpmInstalled()) runtime.npmVersion() else null
-            if (node == null && npm == null) return@Thread
-            main.runOnUiThread {
-                if (!isAdded) return@runOnUiThread
-                if (node != null) appendTerminal("│ node   $node\n")
-                if (npm != null) appendTerminal("│ npm    $npm\n")
-                appendTerminal(prompt())
-            }
-        }.start()
-    }
-
-    private fun appendTerminal(value: String) {
-        if (!isAdded || view == null) return
-        if (!this::output.isInitialized) return
-        output.append(Ansi.render(value))
-        val content = output.text
-        if (content is Editable && content.length > MAX_TERMINAL_CHARS) {
-            content.delete(0, content.length - MAX_TERMINAL_CHARS)
-        }
-        terminalScroll.post { terminalScroll.fullScroll(View.FOCUS_DOWN) }
-    }
-
-    private fun clearTerminal() {
-        output.setText("", TextView.BufferType.EDITABLE)
-        appendTerminal(prompt())
-    }
-
-    /** Prompt no estilo do Termux: `nodesphere:~/projeto$ `. */
-    private fun prompt(): String {
-        val session = shell ?: return "nodesphere:~$ "
-        val current = session.directory.absolutePath
-        val home = runtime.home.absolutePath
-        val root = project.absolutePath
-        val shown = when {
-            current == home -> "~"
-            current == root -> project.name
-            current.startsWith(root + File.separator) ->
-                project.name + "/" + current.removePrefix(root + File.separator)
-            current.startsWith(home + File.separator) -> "~/" + current.removePrefix(home + File.separator)
-            else -> current
-        }
-        return "\u001b[38;5;114mnodesphere:$shown\u001b[0m$ "
-    }
-
-    private fun sendCommand(raw: String) {
+    /** Envia uma linha ao shell (botão Executar, npm install, atalhos). */
+    private fun submitCommand(raw: String) {
         val line = raw.trim()
         if (line.isEmpty()) return
-        val session = shell ?: return
-        when (line) {
-            "clear", "cls" -> {
-                clearTerminal()
-                return
-            }
-            "help" -> {
-                appendTerminal(prompt() + line + "\n")
-                appendTerminal(HELP)
-                appendTerminal(prompt())
-                return
-            }
-            "runtime" -> {
-                appendTerminal(prompt() + line + "\n")
-                Thread {
-                    val report = runtime.diagnostics()
-                    main.runOnUiThread {
-                        if (!isAdded) return@runOnUiThread
-                        appendTerminal(report + "\n")
-                        appendTerminal(prompt())
-                    }
-                }.start()
-                return
-            }
-        }
-        if (!session.isOpen && !session.start()) return
-        appendTerminal(prompt() + line + "\n")
-        session.send(line)
-    }
-
-    private fun insert(text: String) {
-        val editable = command.editableText ?: return
-        val start = maxOf(0, command.selectionStart)
-        editable.insert(start, text)
-        command.setSelection(minOf(command.length(), start + text.length))
-    }
-
-    private fun history(step: Int) {
-        val session = shell ?: return
-        val items = session.history
-        if (items.isEmpty()) return
-        historyIndex = (historyIndex + step).coerceIn(-1, items.size - 1)
-        val value = if (historyIndex < 0) "" else items[items.size - 1 - historyIndex]
-        command.setText(value)
-        command.setSelection(command.length())
-    }
-
-    private fun interrupt() {
-        val session = shell ?: return
-        if (!session.isOpen) return
-        session.interrupt()
+        val current = session ?: return
+        if (!current.running && !current.start()) return
+        current.submit(line)
     }
 
     private fun stopShell() {
-        val session = shell ?: return
-        if (!session.isOpen) {
-            appendTerminal("\n[ shell já está parado ]\n")
+        val current = session ?: return
+        if (!current.running) {
+            terminal.feed("\r\n\u001b[90m[ o shell já está parado ]\u001b[0m\r\n")
             return
         }
-        session.close("Shell encerrado")
+        current.close("Shell encerrado")
+    }
+
+    private fun interrupt() {
+        session?.interrupt()
     }
 
     private fun toggleTerminal() {
-        panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-        if (panel.visibility == View.VISIBLE) {
-            terminalScroll.post { terminalScroll.fullScroll(View.FOCUS_DOWN) }
+        val opening = panel.visibility != View.VISIBLE
+        panel.visibility = if (opening) View.VISIBLE else View.GONE
+        if (opening) {
+            val current = session
+            if (current != null && !current.running) current.start()
+            terminal.post { terminal.focusTerminal() }
+        } else {
+            terminal.hideKeyboard()
         }
     }
 
     // ---- execução -----------------------------------------------------------
 
+    /**
+     * Executa o projeto no terminal integrado: o shell já está na pasta do
+     * projeto, então `node arquivo.js` roda exatamente onde os arquivos estão.
+     */
     private fun runProject() {
         if (!runtime.isNodeInstalled()) {
             offerNode()
@@ -372,8 +283,12 @@ class IdeFragment : Fragment() {
             main.message("Nenhum arquivo JavaScript encontrado para executar")
             return
         }
+        save()
         panel.visibility = View.VISIBLE
-        sendCommand("node " + quote(entry.name))
+        val current = session
+        current?.ensureDirectory(project)
+        submitCommand("node " + quote(entry.name))
+        terminal.post { terminal.focusTerminal() }
     }
 
     private fun npmInstall() {
@@ -393,7 +308,9 @@ class IdeFragment : Fragment() {
             return
         }
         panel.visibility = View.VISIBLE
-        sendCommand("npm install")
+        save()
+        session?.ensureDirectory(project)
+        submitCommand("npm install")
     }
 
     private fun offerNode() {
@@ -401,8 +318,9 @@ class IdeFragment : Fragment() {
             .setTitle("Node.js não instalado")
             .setMessage(
                 "O aplicativo procura o runtime em ${runtime.bin.absolutePath}/node.\n\n" +
-                    "Instale em Plugins → Node.js (importar executável, .zip ou .tar.gz) ou " +
-                    "empacote um binário no APK em jniLibs/<abi>/libnode.so."
+                    "Instale em Plugins → Node.js → Instalar do Termux (binário Bionic, " +
+                    "o único que executa no Android) ou importe o `node` de um Termux " +
+                    "instalado no aparelho. Binários de nodejs.org são glibc e não rodam."
             )
             .setPositiveButton("Abrir Plugins") { _, _ -> main.show(PluginsFragment()) }
             .setNegativeButton("Fechar", null)
@@ -675,8 +593,8 @@ class IdeFragment : Fragment() {
     }
 
     override fun onDestroyView() {
-        shell?.close("Shell encerrado")
-        shell = null
+        session?.close("Shell encerrado")
+        session = null
         super.onDestroyView()
     }
 
@@ -689,25 +607,13 @@ class IdeFragment : Fragment() {
         private const val ARG_OPEN_TERMINAL = "open_terminal"
         private const val PREF_AUTOCOMPLETE = "autocomplete"
         private const val PREF_LINE_NUMBERS = "line_numbers"
-        private const val MAX_TERMINAL_CHARS = 200_000
+
+        /** ESC: prefixo das sequências das setas/Home enviadas pela barra de teclas. */
+        private const val ESCAPE = "\u001b"
 
         private val TEXT_EXTENSIONS = setOf(
             "js", "mjs", "cjs", "ts", "tsx", "jsx", "html", "css", "json", "md", "txt", "xml", "yml", "yaml"
         )
-
-        private val HELP = """
-            |Comandos do NodeSphere:
-            |  help              esta ajuda
-            |  runtime           estado do Node.js/npm e caminhos
-            |  clear             limpa a tela
-            |  node -v           versão do Node.js (se instalado)
-            |  npm install       instala dependências do projeto
-            |  exit              encerra o shell
-            |
-            |O ambiente usa PREFIX em files/usr (bin, lib) e PATH com node/npm.
-            |Sem PTY não há Ctrl+C real, tela cheia nem programas interativos de tela.
-            |
-        """.trimMargin()
 
         fun newInstance(openTerminal: Boolean = false) = IdeFragment().apply {
             arguments = Bundle().apply { putBoolean(ARG_OPEN_TERMINAL, openTerminal) }

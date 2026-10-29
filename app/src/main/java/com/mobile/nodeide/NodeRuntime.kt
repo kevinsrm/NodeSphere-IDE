@@ -40,7 +40,9 @@ class NodeRuntime(context: Context) {
     val lib = File(prefix, "lib")
     val modules = File(lib, "node_modules")
     val home = File(app.filesDir, "home")
-    val tmp = File(app.filesDir, "tmp")
+
+    /** `TMPDIR` do prefixo (`files/usr/tmp`), como no Termux. */
+    val tmp = File(prefix, "tmp")
 
     val nodeFile: File get() = File(bin, "node")
     val npmCli: File get() = File(modules, "npm/bin/npm-cli.js")
@@ -51,6 +53,7 @@ class NodeRuntime(context: Context) {
         modules.mkdirs()
         home.mkdirs()
         tmp.mkdirs()
+        File(home, ".npm").mkdirs()
     }
 
     fun isNodeInstalled(): Boolean = nodeFile.isFile && nodeFile.length() > 0L
@@ -65,26 +68,40 @@ class NodeRuntime(context: Context) {
         null
     }
 
-    /** Ambiente usado por todo processo filho (shell, node, npm). */
+    /**
+     * Ambiente usado por todo processo filho (shell, node, npm, agente).
+     *
+     * O `PATH` começa no `bin` do prefixo — é o que faz `node`, `npm` e `npx`
+     * existirem no terminal — e depois segue o `PATH` do sistema, exatamente como
+     * no Termux. Sem `HOME`/`TMPDIR`/`NODE_PATH` o npm falha ao resolver módulos
+     * globais e o Node não acha o registry local.
+     */
     fun environment(directory: File? = null): Map<String, String> {
-        val path = listOf(
-            bin.absolutePath,
-            "/system/bin",
-            "/system/xbin",
-            "/vendor/bin"
-        ).joinToString(":")
+        val systemPath = System.getenv("PATH") ?: DEFAULT_PATH
+        val path = buildString {
+            append(bin.absolutePath)
+            for (entry in systemPath.split(':')) {
+                if (entry.isEmpty() || entry == bin.absolutePath) continue
+                append(':').append(entry)
+            }
+        }
+        val working = directory ?: home
         val environment = HashMap<String, String>()
         environment["HOME"] = home.absolutePath
         environment["PREFIX"] = prefix.absolutePath
         environment["TMPDIR"] = tmp.absolutePath
         environment["PATH"] = path
         environment["LD_LIBRARY_PATH"] = lib.absolutePath + ":" + app.applicationInfo.nativeLibraryDir
+        environment["NODE_PATH"] = modules.absolutePath
+        environment["NODE_REPL_HISTORY"] = File(home, ".node_repl_history").absolutePath
         environment["NPM_CONFIG_CACHE"] = File(tmp, "npm-cache").absolutePath
         environment["NPM_CONFIG_PREFIX"] = prefix.absolutePath
-        environment["NODE_PATH"] = modules.absolutePath
+        environment["NPM_CONFIG_TMP"] = tmp.absolutePath
+        environment["NPM_CONFIG_USERCONFIG"] = File(home, ".npmrc").absolutePath
+        environment["SHELL"] = SHELL
         environment["TERM"] = "xterm-256color"
         environment["LANG"] = "en_US.UTF-8"
-        environment["PWD"] = (directory ?: home).absolutePath
+        environment["PWD"] = working.absolutePath
         return environment
     }
 
@@ -146,6 +163,15 @@ class NodeRuntime(context: Context) {
                     "Use um binário `node` ou o `libnode.so` de um APK com Node empacotado."
             )
         }
+        val interpreter = info.interpreter
+        if (interpreter != null && !interpreter.startsWith(BIONIC_PREFIX)) {
+            throw IOException(
+                "Este `node` é de Linux glibc (interpretador $interpreter), não roda no Android: " +
+                    "o sistema usa Bionic ($BIONIC_PREFIX). Baixe o binário do Termux " +
+                    "(Plugins → Node.js → Instalar do Termux) ou importe o `node` de um Termux " +
+                    "já instalado no aparelho."
+            )
+        }
         val expected = expectedMachine()
         if (expected != 0 && info.machine != expected) {
             throw IOException(
@@ -156,6 +182,75 @@ class NodeRuntime(context: Context) {
         copy(source, nodeFile)
         makeExecutable(nodeFile)
         writeLaunchers()
+    }
+
+    /**
+     * Instala o Node.js a partir do repositório do Termux (compilado contra
+     * Bionic, portanto o único binário oficial que executa em Android).
+     */
+    fun installTermuxNode(progress: (String) -> Unit = {}): String {
+        prepare()
+        val message = TermuxPackages(this).installNode(progress)
+        if (!isNpmInstalled()) {
+            progress("Instalando npm…")
+            try {
+                installNpm(null, progress)
+            } catch (error: Exception) {
+                Log.w(TAG, "npm não pôde ser baixado: ${error.message}")
+            }
+        }
+        writeLaunchers()
+        return message
+    }
+
+    /**
+     * Instala um runtime empacotado em `assets/node/`: aceita `.deb` do Termux,
+     * `.zip` ou `.tar.gz`. É o caminho para quem quer o Node dentro do APK sem
+     * depender de rede na primeira abertura.
+     */
+    fun installFromAssets(force: Boolean = false, progress: (String) -> Unit = {}): Boolean {
+        if (!force && isNodeInstalled()) return false
+        val names = try {
+            app.assets.list(ASSETS_NODE)?.toList() ?: emptyList()
+        } catch (error: Exception) {
+            Log.w(TAG, "assets/node ilegível: ${error.message}")
+            emptyList()
+        }
+        val candidates = names.filter { name ->
+            val lower = name.lowercase()
+            lower.endsWith(".deb") || lower.endsWith(".zip") || lower.endsWith(".tar.gz") ||
+                lower.endsWith(".tgz") || lower == "node" || lower.startsWith("node-")
+        }
+        if (candidates.isEmpty()) return false
+        prepare()
+        for (name in candidates.sorted()) {
+            val temporary = File(tmp, "asset-$name")
+            try {
+                progress("Extraindo $name do APK…")
+                app.assets.open("$ASSETS_NODE/$name").use { input ->
+                    FileOutputStream(temporary).use { output -> input.copyTo(output) }
+                }
+                if (name.endsWith(".deb", ignoreCase = true) || Deb.isDeb(temporary)) {
+                    extractDebIntoPrefix(temporary, progress)
+                } else {
+                    installFile(temporary, progress)
+                }
+                writeLaunchers()
+                Log.i(TAG, "Runtime instalado a partir de assets/$name")
+                return true
+            } catch (error: Exception) {
+                Log.w(TAG, "assets/$name ignorado: ${error.message}")
+            } finally {
+                temporary.delete()
+            }
+        }
+        return false
+    }
+
+    /** Extrai o `.deb` do Termux direto no prefixo (mesmo código do downloader). */
+    private fun extractDebIntoPrefix(deb: File, progress: (String) -> Unit) {
+        progress("Extraindo ${deb.name}…")
+        TermuxPackages(this).installFromDeb(deb, progress)
     }
 
     /** Importa um executável, `.zip`, `.tar.gz` ou `.tgz` escolhido pelo usuário. */
@@ -233,9 +328,24 @@ class NodeRuntime(context: Context) {
         text.append("Node no APK: ")
         text.append(if (bundled.isFile) "sim (${bundled.length() / 1024} KB)" else "não")
         text.append('\n')
+        text.append("Binário: ").append(nodeFile.absolutePath).append('\n')
+        text.append("Interpretador: ")
+        text.append(if (nodeFile.isFile) interpreterOf(nodeFile) else "—")
+        text.append('\n')
+        text.append("HOME: ").append(home.absolutePath).append('\n')
+        text.append("TMPDIR: ").append(tmp.absolutePath).append('\n')
+        text.append("NODE_PATH: ").append(modules.absolutePath).append('\n')
+        text.append("PATH: ").append(environment()["PATH"]).append('\n')
         text.append("Shell: ")
         text.append(run(listOf("/system/bin/sh", "-c", "echo ok"))?.trim() ?: "falhou")
         return text.toString()
+    }
+
+    /** Caminho do carregador ELF (mostra se o binário é Bionic ou glibc). */
+    fun interpreterOf(file: File): String = try {
+        inspectElf(file)?.interpreter ?: "sem PT_INTERP (biblioteca)"
+    } catch (error: Exception) {
+        "ilegível (${error.message})"
     }
 
     /** Cria os scripts npm/npx do prefixo. */
@@ -254,6 +364,12 @@ class NodeRuntime(context: Context) {
     }
 
     private fun installFile(file: File, progress: (String) -> Unit): String {
+        // Pacote do Termux (ar + data.tar.xz): o caminho correto para Bionic.
+        if (Deb.isDeb(file)) {
+            progress("Extraindo ${file.name}…")
+            TermuxPackages(this).installFromDeb(file, progress)
+            return "Pacote ${file.name} extraído; node em ${nodeFile.absolutePath}"
+        }
         val magic = readMagic(file)
         return when {
             magic.size >= 2 && magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte() ->
@@ -408,7 +524,19 @@ class NodeRuntime(context: Context) {
         }
     }
 
-    private fun download(
+    /** Baixa uma URL e devolve os bytes (índices de pacote, respostas pequenas). */
+    internal fun fetchBytes(url: String): ByteArray {
+        val temporary = File(tmp, "fetch-${System.currentTimeMillis()}")
+        return try {
+            download(url, temporary)
+            temporary.readBytes()
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    /** Baixa uma URL para um arquivo (usado também pelo instalador do Termux). */
+    internal fun download(
         url: String,
         target: File,
         progress: (Long, Long) -> Unit = { _, _ -> }
@@ -573,22 +701,46 @@ class NodeRuntime(context: Context) {
         val entrySize = le16(header, if (wide) 0x36 else 0x2a)
         val count = le16(header, if (wide) 0x38 else 0x2c)
         var hasInterpreter = false
+        var interpreter: String? = null
         if (tableOffset > 0 && entrySize > 0 && count in 1..128) {
             val table = ByteArray(entrySize * count)
             try {
                 RandomAccessFile(file, "r").use { access ->
                     access.seek(tableOffset)
                     access.readFully(table)
-                }
-                for (index in 0 until count) {
-                    if (le32(table, index * entrySize) == 3L) hasInterpreter = true
+                    for (index in 0 until count) {
+                        if (le32(table, index * entrySize) != 3L) continue
+                        hasInterpreter = true
+                        // PT_INTERP: p_offset e p_filesz apontam para o caminho do
+                        // carregador. É aqui que se descobre se o binário é Bionic
+                        // (/system/bin/linker64) ou glibc (/lib64/ld-linux...).
+                        val offset = if (wide) {
+                            le64(table, index * entrySize + 0x08)
+                        } else {
+                            le32(table, index * entrySize + 0x04)
+                        }
+                        val length = if (wide) {
+                            le64(table, index * entrySize + 0x20)
+                        } else {
+                            le32(table, index * entrySize + 0x10)
+                        }
+                        if (offset > 0 && length in 1L..4096L) {
+                            val path = ByteArray(length.toInt())
+                            access.seek(offset)
+                            access.readFully(path)
+                            interpreter = String(path, Charsets.US_ASCII)
+                                .trimEnd('\u0000')
+                                .trim()
+                                .ifEmpty { null }
+                        }
+                    }
                 }
             } catch (error: Exception) {
                 Log.w(TAG, "Cabeçalho ELF ilegível: ${error.message}")
                 return null
             }
         }
-        return ElfInfo(type, machine, hasInterpreter)
+        return ElfInfo(type, machine, hasInterpreter, interpreter)
     }
 
     private fun le16(data: ByteArray, offset: Int): Int =
@@ -649,15 +801,39 @@ class NodeRuntime(context: Context) {
 
     private fun script(file: File, body: String) {
         file.parentFile?.mkdirs()
+        // O pacote do Termux pode ter deixado um link simbólico em bin/npm;
+        // escrever através dele estragaria o alvo (npm-cli.js), então removemos.
+        if (file.exists() || isSymbolicLink(file)) {
+            if (!file.delete()) Log.w(TAG, "Não foi possível substituir ${file.absolutePath}")
+        }
         file.writeText("#!/system/bin/sh\n# gerado pelo NodeSphere\n$body\n")
         makeExecutable(file)
     }
 
-    private class ElfInfo(val type: Int, val machine: Int, val hasInterpreter: Boolean)
+    private fun isSymbolicLink(file: File): Boolean = try {
+        java.nio.file.Files.isSymbolicLink(file.toPath())
+    } catch (_: Exception) {
+        false
+    }
+
+    private class ElfInfo(
+        val type: Int,
+        val machine: Int,
+        val hasInterpreter: Boolean,
+        val interpreter: String?
+    )
 
     private companion object {
         const val TAG = "NodeSphere"
         const val FALLBACK_NPM = "10.9.2"
         const val NPM_PACKAGE = "https://registry.npmjs.org/npm/-/npm-{version}.tgz"
+        const val SHELL = "/system/bin/sh"
+        const val DEFAULT_PATH = "/sbin:/system/bin:/system/xbin:/vendor/bin"
+
+        /** Interpretador de binários Android; qualquer outro caminho é glibc. */
+        const val BIONIC_PREFIX = "/system/bin/linker"
+
+        /** Pasta de `app/src/main/assets` varrida no bootstrap. */
+        const val ASSETS_NODE = "node"
     }
 }

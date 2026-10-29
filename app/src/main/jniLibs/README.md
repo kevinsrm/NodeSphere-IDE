@@ -21,8 +21,13 @@ Regras:
    arquivo chegar como arquivo real em `nativeLibraryDir`.
 3. Na primeira execução, `NodeRuntime.installBundled()` copia o binário para
    `files/usr/bin/node`, cria os atalhos `npm`/`npx` e baixa o npm do registry.
-4. Sem esse arquivo, o app continua funcionando: o Node pode ser importado por
-   *Plugins → Node.js → Importar executável* ou baixado de uma URL.
+4. Sem esse arquivo, o app continua funcionando: o Node pode ser instalado em
+   *Plugins → Node.js → Instalar do Termux* (pacote oficial compilado contra
+   Bionic), importado por *Plugins → Node.js → Importar executável* (aceita o
+   `.deb` do Termux), baixado de uma URL ou empacotado em
+   `app/src/main/assets/node/` (ver o README daquela pasta).
+5. Um `node` de Linux desktop (glibc) é recusado: `installBinary()` lê o
+   `PT_INTERP` e exige `/system/bin/linker64` (Bionic).
 
 Nada aqui é obrigatório para compilar; o diretório existe para documentar o
 caminho de empacotamento e evitar que a pasta seja removida.

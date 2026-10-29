@@ -108,32 +108,24 @@
     <LinearLayout
         android:id="@+id/terminalPanel"
         android:layout_width="match_parent"
-        android:layout_height="200dp"
+        android:layout_height="220dp"
         android:visibility="gone"
         android:orientation="vertical"
         android:background="#070B16">
 
-        <ScrollView
-            android:id="@+id/terminalScroll"
+        <!-- Terminal de verdade: grade de caracteres, cores ANSI, cursor e
+             histórico rolável. O teclado do sistema digita direto nele. -->
+        <com.mobile.nodeide.TerminalView
+            android:id="@+id/terminal"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:paddingLeft="8dp"
-            android:paddingRight="8dp">
-
-            <TextView
-                android:id="@+id/output"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:paddingTop="6dp"
-                android:textColor="#C9D3E6"
-                android:fontFamily="monospace"
-                android:textSize="12sp" />
-        </ScrollView>
+            android:padding="6dp"
+            android:background="#070B16" />
 
         <HorizontalScrollView
             android:layout_width="match_parent"
-            android:layout_height="36dp"
+            android:layout_height="38dp"
             android:scrollbars="none">
 
             <LinearLayout
@@ -143,45 +135,5 @@
                 android:orientation="horizontal"
                 android:background="#0C1322" />
         </HorizontalScrollView>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="46dp"
-            android:orientation="horizontal"
-            android:background="#0C1322">
-
-            <TextView
-                android:id="@+id/promptMark"
-                android:layout_width="wrap_content"
-                android:layout_height="match_parent"
-                android:gravity="center"
-                android:paddingLeft="8dp"
-                android:paddingRight="4dp"
-                android:text="❯"
-                android:textColor="#7BD88F"
-                android:fontFamily="monospace"
-                android:textSize="14sp" />
-
-            <EditText
-                android:id="@+id/command"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:singleLine="true"
-                android:hint="comando"
-                android:background="@null"
-                android:textColor="#ffffff"
-                android:textColorHint="#5C6884"
-                android:fontFamily="monospace"
-                android:textSize="13sp"
-                android:inputType="textNoSuggestions" />
-
-            <Button
-                android:id="@+id/execute"
-                android:layout_width="wrap_content"
-                android:layout_height="match_parent"
-                android:minWidth="52dp"
-                android:text="▶" />
-        </LinearLayout>
     </LinearLayout>
 </LinearLayout>
