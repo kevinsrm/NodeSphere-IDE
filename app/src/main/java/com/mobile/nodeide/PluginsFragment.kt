@@ -43,7 +43,7 @@ class PluginsFragment : Fragment() {
         PluginCard(
             id = "terminal",
             name = "Terminal Android",
-            description = "Shell /system/bin/sh integrado ao editor, executado na pasta do projeto.",
+            description = "Terminal /system/bin/sh integrado ao editor; abre em um workspace próprio ou no projeto atual.",
             status = "INTEGRADO",
             action = "Abrir terminal",
             icon = R.drawable.ic_terminal,
@@ -52,7 +52,7 @@ class PluginsFragment : Fragment() {
         PluginCard(
             id = "sqlite",
             name = "SQLite",
-            description = "Banco local nativo do Android, com console SQL salvo no projeto.",
+            description = "Banco local do Android, com console SQL salvo no projeto aberto ou workspace privado.",
             status = "INTEGRADO",
             action = "Abrir console",
             icon = R.drawable.ic_sqlite,
@@ -152,20 +152,20 @@ class PluginsFragment : Fragment() {
     }
 
     private fun openTerminal() {
-        val project = main.project
-        if (project == null || !project.isDirectory) {
-            main.message("Abra ou crie um projeto para usar o terminal")
-            main.show(ProjectsFragment())
+        val project = main.project?.takeIf { it.isDirectory } ?: try {
+            main.terminalWorkspace()
+        } catch (error: Exception) {
+            main.message(error.message ?: "Não foi possível abrir o terminal")
             return
         }
         main.openProject(project, openTerminal = true)
     }
 
     private fun openSqlite() {
-        val project = main.project
-        if (project == null || !project.isDirectory) {
-            main.message("Abra ou crie um projeto para usar o console SQLite")
-            main.show(ProjectsFragment())
+        val project = main.project?.takeIf { it.isDirectory } ?: try {
+            main.terminalWorkspace()
+        } catch (error: Exception) {
+            main.message(error.message ?: "Não foi possível abrir o console SQLite")
             return
         }
         SqliteConsoleDialog.show(main, project)

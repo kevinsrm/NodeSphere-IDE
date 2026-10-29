@@ -75,7 +75,7 @@ E, em `gradle.properties`, mantenha `android.useAndroidX=true` (sem isso o build
 ## Disponível
 
 - Criação de projetos HTTP, API Express e Express fullstack em armazenamento privado. Os arquivos são escritos em uma pasta temporária e só aparecem no workspace depois que o template termina; o `package.json` é gerado por `JSONObject`. Pesquisa, abertura, importação SAF (cópia local) e clonagem HTTPS de repositórios públicos com JGit.
-- Catálogo visual de plugins com ícones de marca e estado explícito. Terminal Android e console SQLite têm ações funcionais; o console SQLite cria `nodesphere.sqlite` no projeto e executa consultas/comandos SQL.
+- Catálogo visual de plugins com ícones de marca e estado explícito. O terminal Android e o console SQLite abrem mesmo sem projeto, usando um workspace privado dedicado; o console SQLite cria `nodesphere.sqlite` nesse workspace (ou no projeto aberto) e executa consultas/comandos SQL.
 - Interface escura redesenhada e compatível com edge-to-edge: os insets de status, navegação e teclado são aplicados ao conteúdo, sem desenhar títulos por trás das barras do sistema.
 - Editor com árvore expansível, abas, criação e salvamento de arquivos, pesquisa, destaque lexical básico e barra de símbolos. Alterações são salvas ao trocar de arquivo ou sair da tela. O controle de autocompletar habilita sugestões básicas de palavras-chave, sem análise semântica. Undo/redo mantém até 100 estados do arquivo atual e é reiniciado ao trocar de arquivo.
 - Painel redimensionável que executa comandos com `/system/bin/sh` no diretório do projeto, exibindo saída. O shell persiste enquanto o editor está aberto, permitindo `cd` e entrada de dados; não é um terminal PTY e programas que exigem controle de terminal podem não funcionar. O botão Parar encerra o shell, mas não garante encerrar processos filhos.
@@ -83,7 +83,7 @@ E, em `gradle.properties`, mantenha `android.useAndroidX=true` (sem isso o build
 
 ## Limitações importantes
 
-Node.js, npm, MariaDB e MySQL **não estão incluídos e ainda não podem ser instalados pelo catálogo**. O catálogo deixa isso explícito em vez de simular uma instalação. Node/npm requerem uma distribuição Android compatível com a ABI e o sandbox; MariaDB/MySQL requerem um servidor externo e um conector, ainda não integrados. Terminal Android e SQLite são nativos; o console SQLite trabalha com um arquivo dentro do projeto. Em aparelhos comuns, `node`, `npm` e `git` não existirão no shell. PTY, debugger e autocomplete semântico seguem como trabalho futuro. O realce é lexical genérico, não um parser completo para JS/TS/HTML/CSS/JSON/Markdown/EJS/Handlebars.
+Node.js e npm **não são instalados por este APK**: o catálogo não simula uma instalação. Para fornecer Node de verdade é necessário incluir/integrar um runtime Android por ABI (e tratar os limites do sandbox); um executável Linux/desktop baixado não funciona diretamente no Android. MariaDB/MySQL requerem servidor externo e conector, ainda não integrados. Em aparelhos comuns, `node`, `npm` e `git` não existirão no shell. Terminal Android (`/system/bin/sh`) e SQLite são nativos; o terminal pode ser aberto sem projeto em um workspace privado e o console SQLite usa o projeto atual ou esse workspace. PTY, debugger e autocomplete semântico seguem como trabalho futuro. O realce é lexical genérico, não um parser completo para JS/TS/HTML/CSS/JSON/Markdown/EJS/Handlebars.
 
 A clonagem depende do JGit, que requer APIs Java nem sempre disponíveis em Android; se a clonagem falhar em algum aparelho, use a importação por pasta.
 

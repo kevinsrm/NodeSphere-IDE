@@ -105,9 +105,13 @@ class MainActivity : AppCompatActivity() {
             else -> R.id.nav_projects
         }
         selectDestination(destination)
+        // Fragment navigation can be triggered by an import/clone worker after the
+        // Activity has saved its state. In that case commit() throws and used to
+        // take down the whole editor; retaining the latest destination is safer.
         supportFragmentManager.beginTransaction()
+            .setReorderingAllowed(true)
             .replace(R.id.content, fragment)
-            .commit()
+            .commitAllowingStateLoss()
     }
 
     private fun selectDestination(destination: Int) {
@@ -126,13 +130,31 @@ class MainActivity : AppCompatActivity() {
 
     /** Abre o projeto no editor e, opcionalmente, deixa o terminal visível. */
     fun openProject(directory: File, openTerminal: Boolean = false) {
-        if (!directory.isDirectory) {
-            message("A pasta do projeto não está disponível")
+        try {
+            val canonical = directory.canonicalFile
+            if (!canonical.isDirectory || !canonical.canRead()) {
+                message("A pasta do projeto não está disponível ou não pode ser lida")
+                show(ProjectsFragment())
+                return
+            }
+            project = canonical
+            show(IdeFragment.newInstance(openTerminal))
+        } catch (error: Exception) {
+            message("Não foi possível abrir o projeto: ${error.message ?: error.javaClass.simpleName}")
             show(ProjectsFragment())
-            return
         }
-        project = directory
-        show(IdeFragment.newInstance(openTerminal))
+    }
+
+    /** Workspace local usado pelo terminal mesmo antes de existir um projeto. */
+    fun terminalWorkspace(): File {
+        val workspace = File(filesDir, "terminal-workspace")
+        if (!workspace.exists() && !workspace.mkdirs()) {
+            throw IOException("Não foi possível preparar o workspace do terminal")
+        }
+        if (!workspace.isDirectory || !workspace.canWrite()) {
+            throw IOException("O workspace do terminal não pode ser usado")
+        }
+        return workspace.canonicalFile
     }
 
     /** Diretório privado onde os projetos ficam armazenados. */
