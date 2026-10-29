@@ -41,6 +41,8 @@ Os arquivos ficam em `app/src/main/java/com/mobile/nodeide/` — o diretório pa
 
 Criar o projeto primeiro também funciona: copie os arquivos deste repositório para dentro dele, exatamente nos mesmos caminhos.
 
+Se o SmartIDE gerou um template **Compose**, remova os arquivos do template que ficaram em `app/src/main/kotlin/com/mobile/nodeide/`, incluindo a `MainActivity.kt` e os arquivos de `ui/theme/`, desde que não contenham alterações suas que queira preservar. Eles não fazem parte deste projeto, que usa XML, e manter a `MainActivity` do template junto com a de `app/src/main/java/` causa uma declaração duplicada. Faça backup antes de remover quaisquer arquivos próprios. Não é necessário adicionar Compose para este projeto.
+
 | Copiar | Para (no projeto novo) |
 | --- | --- |
 | `app/src/main/java/com/mobile/nodeide/*.kt` | `app/src/main/java/com/mobile/nodeide/` |
