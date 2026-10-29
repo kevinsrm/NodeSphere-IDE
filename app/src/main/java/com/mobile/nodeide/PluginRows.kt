@@ -107,7 +107,7 @@ class PluginRows(private val onAction: (String) -> Unit) : RecyclerView.Adapter<
         val description = TextView(context).apply {
             setTextColor(Color.rgb(163, 174, 197))
             textSize = 13f
-            lineSpacingExtra = dp(2).toFloat()
+            setLineSpacing(dp(2).toFloat(), 1f)
             maxLines = 2
             setPadding(0, dp(12), 0, dp(10))
         }

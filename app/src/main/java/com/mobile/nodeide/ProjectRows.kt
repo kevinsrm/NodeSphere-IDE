@@ -55,8 +55,8 @@ class ProjectRows(private val click: (File) -> Unit) : RecyclerView.Adapter<Proj
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             setPadding(dp(11), dp(11), dp(11), dp(11))
         }
-        badge.addView(icon, FrameLayout.LayoutParams(dp(50), dp(50), Gravity.CENTER))
-        row.addView(badge, LinearLayout.LayoutParams(dp(50), dp(50)))
+        badge.addView(icon, FrameLayout.LayoutParams(dp(context, 50), dp(context, 50), Gravity.CENTER))
+        row.addView(badge, LinearLayout.LayoutParams(dp(context, 50), dp(context, 50)))
 
         val details = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -85,7 +85,7 @@ class ProjectRows(private val click: (File) -> Unit) : RecyclerView.Adapter<Proj
             setTextColor(Color.rgb(133, 145, 174))
             textSize = 28f
             gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(dp(24), dp(44)))
+        }, LinearLayout.LayoutParams(dp(context, 24), dp(context, 44)))
 
         card.addView(row)
         return Holder(card, title, subtitle)
@@ -108,6 +108,9 @@ class ProjectRows(private val click: (File) -> Unit) : RecyclerView.Adapter<Proj
         val title: TextView,
         val subtitle: TextView
     ) : RecyclerView.ViewHolder(card)
+
+    private fun dp(context: android.content.Context, value: Int): Int =
+        (value * context.resources.displayMetrics.density).toInt()
 
     private fun android.view.View.dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
