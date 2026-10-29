@@ -183,6 +183,9 @@ class AgentFragment : Fragment() {
             main.message("Abra um projeto primeiro")
             return
         }
+        if (!root.exists()) {
+            root.mkdirs()
+        }
         val url = prefs.getString("url", "").orEmpty()
         if (!url.startsWith("https://") || prefs.getString("model", "").orEmpty().isEmpty()) {
             main.message("Configure URL HTTPS e modelo")

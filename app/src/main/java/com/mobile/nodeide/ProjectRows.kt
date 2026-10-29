@@ -4,6 +4,7 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.util.Log
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -20,9 +21,13 @@ class ProjectRows(private val click: (File) -> Unit) : RecyclerView.Adapter<Proj
     private val projects = mutableListOf<File>()
 
     fun set(files: List<File>) {
-        projects.clear()
-        projects.addAll(files)
-        notifyDataSetChanged()
+        try {
+            projects.clear()
+            projects.addAll(files)
+            notifyDataSetChanged()
+        } catch (e: Exception) {
+            Log.e("ProjectRows", "Erro ao atualizar projetos: ${e.message}")
+        }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
@@ -31,7 +36,7 @@ class ProjectRows(private val click: (File) -> Unit) : RecyclerView.Adapter<Proj
             setRadius(dp(18).toFloat())
             cardElevation = 0f
             setStrokeWidth(dp(1))
-            setStrokeColor(android.content.res.ColorStateList.valueOf(Color.rgb(42, 52, 75)))
+            setStrokeColor(ColorStateList.valueOf(Color.rgb(42, 52, 75)))
             setCardBackgroundColor(Color.rgb(19, 26, 44))
             isClickable = true
             isFocusable = true
@@ -92,12 +97,25 @@ class ProjectRows(private val click: (File) -> Unit) : RecyclerView.Adapter<Proj
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
-        val project = projects[position]
-        holder.title.text = project.name
-        holder.subtitle.text = "Projeto local  ·  ~/projects/${project.name}"
-        holder.card.setOnClickListener {
-            val current = holder.bindingAdapterPosition
-            if (current != RecyclerView.NO_POSITION) click(projects[current])
+        try {
+            if (position in projects.indices) {
+                val project = projects[position]
+                val projectName = project.name.ifEmpty { "projeto" }
+                holder.title.text = projectName
+                holder.subtitle.text = "Projeto local  ·  ~/projects/$projectName"
+                holder.card.setOnClickListener {
+                    val current = holder.bindingAdapterPosition
+                    if (current != RecyclerView.NO_POSITION && current in projects.indices) {
+                        try {
+                            click(projects[current])
+                        } catch (e: Exception) {
+                            Log.e("ProjectRows", "Erro ao clicar no projeto: ${e.message}")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ProjectRows", "Erro em onBindViewHolder: ${e.message}")
         }
     }
 

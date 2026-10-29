@@ -73,7 +73,20 @@ class IdeFragment : Fragment() {
                 main.show(ProjectsFragment())
                 return root
             }
-            project = directory
+            if (!directory.exists()) {
+                directory.mkdirs()
+            }
+            project = try { directory.canonicalFile } catch (_: Exception) { directory }
+            if (!project.exists()) {
+                project.mkdirs()
+            }
+
+            try {
+                ProjectConfigHelper.ensurePackageJson(project)
+                ProjectConfigHelper.ensureSiJson(project)
+            } catch (e: Exception) {
+                android.util.Log.w("IdeFragment", "Configuração inicial do projeto: ${e.message}")
+            }
 
             val preferences = main.getPreferences(Context.MODE_PRIVATE)
             editor = root.findViewById(R.id.editor)
@@ -318,10 +331,8 @@ class IdeFragment : Fragment() {
         AlertDialog.Builder(main)
             .setTitle("Node.js não instalado")
             .setMessage(
-                "O aplicativo procura o runtime em ${runtime.bin.absolutePath}/node.\n\n" +
-                    "Importe em Plugins → Node.js → Importar executável um `node` " +
-                    "compilado para Android (Bionic) — por exemplo, o binário de um " +
-                    "Termux instalado no aparelho. Binários de nodejs.org são glibc e não rodam."
+                "O runtime do Node.js não foi encontrado em ${runtime.bin.absolutePath}/node.\n\n" +
+                    "Abra a aba Plugins para restaurar o runtime embutido ou reinicie o aplicativo."
             )
             .setPositiveButton("Abrir Plugins") { _, _ -> main.show(PluginsFragment()) }
             .setNegativeButton("Fechar", null)
@@ -330,12 +341,8 @@ class IdeFragment : Fragment() {
 
     private fun entryScript(): File? {
         val mainField = try {
-            val manifest = File(project, "package.json")
-            if (manifest.isFile) {
-                JSONObject(MainActivity.read(manifest)).optString("main", "").trim()
-            } else {
-                ""
-            }
+            val manifest = ProjectConfigHelper.ensurePackageJson(project)
+            manifest.optString("main", "").trim()
         } catch (_: Exception) {
             ""
         }
@@ -415,37 +422,49 @@ class IdeFragment : Fragment() {
         visitedDirectories.clear()
         val labels = mutableListOf<String>()
         try {
-            addTree(project.canonicalFile, 0, labels)
+            if (!project.exists()) {
+                project.mkdirs()
+            }
+            val canonical = try { project.canonicalFile } catch (_: Exception) { project }
+            if (!canonical.exists()) {
+                canonical.mkdirs()
+            }
+            addTree(canonical, 0, labels)
             rows.set(labels)
         } catch (error: Exception) {
             rows.set(emptyList())
-            main.message("Não foi possível listar os arquivos do projeto: ${error.message}")
+            main.message("Não foi possível listar os arquivos do projeto: ${error.message ?: error.javaClass.simpleName}")
         }
     }
 
     private fun addTree(file: File, depth: Int, labels: MutableList<String>) {
         if (depth > 20) return
-        val rootPath = project.canonicalPath
-        val canonical = file.canonicalFile
-        val canonicalPath = canonical.path
-        if (canonicalPath != rootPath && !canonicalPath.startsWith(rootPath + File.separator)) return
-        if (canonical.isDirectory && !visitedDirectories.add(canonicalPath)) return
+        try {
+            if (!file.exists()) return
+            val rootPath = project.canonicalPath
+            val canonical = file.canonicalFile
+            val canonicalPath = canonical.path
+            if (canonicalPath != rootPath && !canonicalPath.startsWith(rootPath + File.separator)) return
+            if (canonical.isDirectory && !visitedDirectories.add(canonicalPath)) return
 
-        visible.add(canonical)
-        val prefix = "  ".repeat(depth)
-        val marker = if (canonical.isDirectory) {
-            if (expanded.contains(canonical.absolutePath)) "▾ 📁 " else "▸ 📁 "
-        } else {
-            "  "
-        }
-        labels.add(prefix + marker + (canonical.name.ifEmpty { project.name }))
+            visible.add(canonical)
+            val prefix = "  ".repeat(depth)
+            val marker = if (canonical.isDirectory) {
+                if (expanded.contains(canonical.absolutePath)) "▾ 📁 " else "▸ 📁 "
+            } else {
+                "  "
+            }
+            labels.add(prefix + marker + (canonical.name.ifEmpty { project.name }))
 
-        if (canonical.isDirectory && expanded.contains(canonical.absolutePath)) {
-            val children = canonical.listFiles() ?: return
-            children.sortWith(
-                compareBy<File>({ !it.isDirectory }, { it.name.lowercase(Locale.ROOT) })
-            )
-            for (child in children) addTree(child, depth + 1, labels)
+            if (canonical.isDirectory && expanded.contains(canonical.absolutePath)) {
+                val children = canonical.listFiles() ?: return
+                children.sortWith(
+                    compareBy<File>({ !it.isDirectory }, { it.name.lowercase(Locale.ROOT) })
+                )
+                for (child in children) addTree(child, depth + 1, labels)
+            }
+        } catch (error: Exception) {
+            android.util.Log.w("IdeFragment", "Erro ao varrer árvore: ${error.message}")
         }
     }
 

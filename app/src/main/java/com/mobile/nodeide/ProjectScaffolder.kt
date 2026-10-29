@@ -24,21 +24,31 @@ internal object ProjectScaffolder {
         if (!projectsDirectory.exists() && !projectsDirectory.mkdirs()) {
             throw IOException("Não foi possível criar a pasta de projetos")
         }
-        if (!projectsDirectory.isDirectory) {
-            throw IOException("O destino de projetos não é uma pasta")
+
+        val root = try { projectsDirectory.canonicalFile } catch (_: Exception) { projectsDirectory }
+        if (!root.exists() && !root.mkdirs()) {
+            throw IOException("Não foi possível preparar o diretório raiz de projetos")
         }
 
-        val root = projectsDirectory.canonicalFile
         val destination = File(root, name)
         if (destination.exists()) throw IOException("Projeto já existe")
 
         val staging = File(root, ".nodesphere-${UUID.randomUUID()}")
-        if (!staging.mkdir()) throw IOException("Não foi possível preparar o projeto")
+        if (!staging.exists() && !staging.mkdirs()) {
+            throw IOException("Não foi possível preparar a pasta temporária do projeto")
+        }
 
         try {
             writeTemplate(staging, name, template)
             if (destination.exists()) throw IOException("Projeto já existe")
             if (!staging.renameTo(destination)) {
+                if (!destination.exists() && !destination.mkdirs()) {
+                    throw IOException("Não foi possível criar a pasta de destino do projeto")
+                }
+                staging.copyRecursively(destination, overwrite = true)
+                deleteTree(staging)
+            }
+            if (!destination.exists() || !destination.isDirectory) {
                 throw IOException("Não foi possível finalizar a criação do projeto")
             }
             return destination
@@ -50,6 +60,10 @@ internal object ProjectScaffolder {
     }
 
     private fun writeTemplate(directory: File, projectName: String, template: Int) {
+        if (!directory.exists()) {
+            directory.mkdirs()
+        }
+
         val dependencies = JSONObject()
         if (template != 0) dependencies.put("express", "^4.21.2")
 
@@ -57,15 +71,26 @@ internal object ProjectScaffolder {
         val manifest = JSONObject()
             .put("name", npmName(projectName))
             .put("version", "1.0.0")
+            .put("main", "server.js")
             .put("private", true)
             .put("scripts", scripts)
         if (template != 0) manifest.put("dependencies", dependencies)
         MainActivity.write(File(directory, "package.json"), manifest.toString(2) + "\n")
+
+        val siConfig = JSONObject()
+            .put("name", npmName(projectName))
+            .put("type", "nodejs")
+            .put("version", "1.0.0")
+            .put("entry", "server.js")
+        MainActivity.write(File(directory, ".si.json"), siConfig.toString(2) + "\n")
+
         MainActivity.write(File(directory, "server.js"), serverSource(template))
 
         if (template == 2) {
+            val publicDir = File(directory, "public")
+            if (!publicDir.exists()) publicDir.mkdirs()
             MainActivity.write(
-                File(directory, "public/index.html"),
+                File(publicDir, "index.html"),
                 """<!doctype html>
 <html lang="pt-BR">
 <head>

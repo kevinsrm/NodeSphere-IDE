@@ -74,6 +74,9 @@ class TerminalSession(
 
     private fun openShell(showBanner: Boolean): Boolean {
         try {
+            if (!directory.exists()) {
+                directory.mkdirs()
+            }
             // O shell nasce na raiz do projeto ativo (`directory` inicial =
             // project). O `cd` manual é acompanhado pelo marcador; os atalhos
             // do app (Executar / npm install) forçam a volta com ensureDirectory().
