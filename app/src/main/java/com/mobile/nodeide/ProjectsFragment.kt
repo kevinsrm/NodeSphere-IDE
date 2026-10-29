@@ -75,17 +75,20 @@ class ProjectsFragment : Fragment() {
     private fun refresh() {
         if (!this::rows.isInitialized) return
         files.clear()
-        val all = main.projects().listFiles()
-        if (all != null) {
-            all.sort()
+        try {
+            val all = main.projects().listFiles().orEmpty()
+            all.sortBy { it.name.lowercase(Locale.ROOT) }
             val query = filter.lowercase(Locale.ROOT)
             for (file in all) {
                 if (file.isDirectory && file.name.lowercase(Locale.ROOT).contains(query)) {
                     files.add(file)
                 }
             }
+            rows.set(files)
+        } catch (error: Exception) {
+            rows.set(emptyList())
+            main.message("Não foi possível carregar os projetos: ${error.message}")
         }
-        rows.set(files)
     }
 
     private fun actions() {
