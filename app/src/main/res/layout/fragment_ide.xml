@@ -113,8 +113,9 @@
         android:orientation="vertical"
         android:background="#070B16">
 
-        <!-- Terminal de verdade: grade de caracteres, cores ANSI, cursor e
-             histórico rolável. O teclado do sistema digita direto nele. -->
+        <!-- Terminal: grade monoespaçada com cores ANSI, cursor, histórico
+             rolável e seleção/cópia nativas (toque longo). O teclado do sistema
+             digita direto nele. -->
         <com.mobile.nodeide.TerminalView
             android:id="@+id/terminal"
             android:layout_width="match_parent"

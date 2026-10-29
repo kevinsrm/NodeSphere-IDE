@@ -21,8 +21,9 @@ import java.util.zip.ZipInputStream
  * files/usr/bin/node        executável do Node.js
  * files/usr/bin/npm         script que chama o npm-cli.js
  * files/usr/lib/node_modules/npm
+ * files/usr/etc/tls         openssl.cnf + cert.pem (OPENSSL_CONF / SSL_CERT_FILE)
+ * files/usr/tmp             TMPDIR e cache do npm
  * files/home                HOME
- * files/tmp                 TMPDIR e cache do npm
  * ```
  *
  * O gerenciador descobre o Node de três jeitos: empacotado no APK (um executável
@@ -30,6 +31,11 @@ import java.util.zip.ZipInputStream
  * `.tar.gz` ou `.tgz`) ou baixado de uma URL informada. O npm é sempre obtido do
  * registry oficial (`registry.npmjs.org`) e é JavaScript puro, então não depende
  * de compilação nativa.
+ *
+ * Todo processo filho é criado por [processBuilder], que injeta o ambiente do
+ * prefixo — incluindo `OPENSSL_CONF` e `SSL_CERT_FILE` apontando para dentro do
+ * app. Isso evita o erro "Permission denied" do Node/npm quando o binário vindo
+ * do Termux procura `/data/data/com.termux/files/usr/etc/tls/openssl.cnf`.
  */
 class NodeRuntime(context: Context) {
 
@@ -44,16 +50,62 @@ class NodeRuntime(context: Context) {
     /** `TMPDIR` do prefixo (`files/usr/tmp`), como no Termux. */
     val tmp = File(prefix, "tmp")
 
+    /** Configuração TLS dentro do prefixo do app (nunca no prefixo do Termux). */
+    val tls = File(prefix, "etc/tls")
+    val opensslConf = File(tls, "openssl.cnf")
+    val certFile = File(tls, "cert.pem")
+
     val nodeFile: File get() = File(bin, "node")
     val npmCli: File get() = File(modules, "npm/bin/npm-cli.js")
 
+    /**
+     * Cria a árvore do prefixo e garante que `openssl.cnf`/`cert.pem` existam
+     * dentro do app. É chamado antes de qualquer processo filho e também no
+     * bootstrap, então um runtime importado depois do primeiro start também
+     * encontra a configuração TLS no caminho certo.
+     */
     fun prepare() {
-        bin.mkdirs()
-        lib.mkdirs()
-        modules.mkdirs()
-        home.mkdirs()
-        tmp.mkdirs()
-        File(home, ".npm").mkdirs()
+        for (directory in listOf(bin, lib, modules, home, tmp, tls, File(tls, "certs"), File(home, ".npm"))) {
+            if (!directory.isDirectory && !directory.mkdirs()) {
+                throw IOException("Não foi possível criar ${directory.absolutePath}")
+            }
+        }
+        installTlsAssets()
+        rewriteTermuxTlsPaths()
+    }
+
+    /** Extrai `assets/runtime/openssl.cnf` (com placeholders) e o bundle CA. */
+    private fun installTlsAssets() {
+        if (!opensslConf.isFile || opensslConf.length() == 0L) {
+            val template = app.assets.open("runtime/openssl.cnf").bufferedReader().use { it.readText() }
+            opensslConf.writeText(
+                template.replace("@PREFIX@", prefix.absolutePath).replace("@HOME@", home.absolutePath)
+            )
+        }
+        if (!certFile.isFile || certFile.length() == 0L) {
+            app.assets.open("runtime/cert.pem").use { input ->
+                FileOutputStream(certFile).use { output -> input.copyTo(output) }
+            }
+        }
+        opensslConf.setReadable(true, true)
+        certFile.setReadable(true, true)
+    }
+
+    /**
+     * Runtimes importados do Termux podem trazer um `openssl.cnf` com o prefixo
+     * hardcoded deles. Reescrevemos qualquer referência ao prefixo do Termux
+     * para o prefixo deste app, em vez de sobrescrever a configuração do usuário.
+     */
+    private fun rewriteTermuxTlsPaths() {
+        if (!opensslConf.isFile) return
+        val text = opensslConf.readText()
+        val rewritten = text
+            .replace("/data/data/com.termux/files/usr", prefix.absolutePath)
+            .replace("/data/user/0/com.termux/files/usr", prefix.absolutePath)
+            .replace("/data/data/com.termux/files/home", home.absolutePath)
+        if (rewritten != text) opensslConf.writeText(rewritten)
+        val cert = File(tls, "cert.pem")
+        if (cert.isFile) cert.setReadable(true, true)
     }
 
     fun isNodeInstalled(): Boolean = nodeFile.isFile && nodeFile.length() > 0L
@@ -90,6 +142,16 @@ class NodeRuntime(context: Context) {
         environment["HOME"] = home.absolutePath
         environment["PREFIX"] = prefix.absolutePath
         environment["TMPDIR"] = tmp.absolutePath
+        // Redireciona o OpenSSL do binário (que pode ter sido compilado com o
+        // prefixo do Termux) para dentro do app. Sem isso `node`/`npm` tentam
+        // abrir /data/data/com.termux/... e morrem com "Permission denied".
+        environment["OPENSSL_CONF"] = opensslConf.absolutePath
+        environment["SSL_CERT_FILE"] = certFile.absolutePath
+        environment["SSL_CERT_DIR"] = File(tls, "certs").absolutePath
+        environment["NODE_EXTRA_CA_CERTS"] = certFile.absolutePath
+        environment["CURL_CA_BUNDLE"] = certFile.absolutePath
+        environment["GIT_SSL_CAINFO"] = certFile.absolutePath
+        environment["NPM_CONFIG_CAFILE"] = certFile.absolutePath
         environment["PATH"] = path
         environment["LD_LIBRARY_PATH"] = lib.absolutePath + ":" + app.applicationInfo.nativeLibraryDir
         environment["NODE_PATH"] = modules.absolutePath
@@ -105,6 +167,20 @@ class NodeRuntime(context: Context) {
         return environment
     }
 
+    /**
+     * Único ponto de criação de processos do app. Garante diretório de trabalho,
+     * ambiente completo do prefixo (incluindo `OPENSSL_CONF`/`SSL_CERT_FILE`) e
+     * prepara os arquivos TLS antes do `start()`.
+     */
+    fun processBuilder(command: List<String>, directory: File): ProcessBuilder {
+        prepare()
+        val working = directory.takeIf { it.isDirectory } ?: home
+        val builder = ProcessBuilder(command)
+        builder.directory(working)
+        builder.environment().putAll(environment(working))
+        return builder
+    }
+
     /** Executa um comando com o ambiente do prefixo e devolve a saída combinada. */
     fun run(command: List<String>, directory: File = home, timeoutMillis: Long = 20_000L): String? {
         var started: Process? = null
@@ -116,10 +192,8 @@ class NodeRuntime(context: Context) {
             }
         }
         return try {
-            val builder = ProcessBuilder(command)
-            builder.directory(directory)
+            val builder = processBuilder(command, directory)
             builder.redirectErrorStream(true)
-            builder.environment().putAll(environment(directory))
             val process = builder.start()
             started = process
             watchdog.start()
@@ -167,9 +241,9 @@ class NodeRuntime(context: Context) {
         if (interpreter != null && !interpreter.startsWith(BIONIC_PREFIX)) {
             throw IOException(
                 "Este `node` é de Linux glibc (interpretador $interpreter), não roda no Android: " +
-                    "o sistema usa Bionic ($BIONIC_PREFIX). Baixe o binário do Termux " +
-                    "(Plugins → Node.js → Instalar do Termux) ou importe o `node` de um Termux " +
-                    "já instalado no aparelho."
+                    "o sistema usa Bionic ($BIONIC_PREFIX). Importe um `node` compilado para " +
+                    "Android (por exemplo, o binário de um Termux já instalado no aparelho) " +
+                    "em Plugins → Node.js → Importar executável."
             )
         }
         val expected = expectedMachine()
@@ -181,32 +255,16 @@ class NodeRuntime(context: Context) {
         }
         copy(source, nodeFile)
         makeExecutable(nodeFile)
+        // Binários vindos do Termux podem ter RUNPATH apontando para o prefixo
+        // deles; $ORIGIN/../lib resolve dentro do app sem depender daquele caminho.
+        ElfPatcher.patchRunPath(nodeFile)
         writeLaunchers()
     }
 
     /**
-     * Instala o Node.js a partir do repositório do Termux (compilado contra
-     * Bionic, portanto o único binário oficial que executa em Android).
-     */
-    fun installTermuxNode(progress: (String) -> Unit = {}): String {
-        prepare()
-        val message = TermuxPackages(this).installNode(progress)
-        if (!isNpmInstalled()) {
-            progress("Instalando npm…")
-            try {
-                installNpm(null, progress)
-            } catch (error: Exception) {
-                Log.w(TAG, "npm não pôde ser baixado: ${error.message}")
-            }
-        }
-        writeLaunchers()
-        return message
-    }
-
-    /**
-     * Instala um runtime empacotado em `assets/node/`: aceita `.deb` do Termux,
-     * `.zip` ou `.tar.gz`. É o caminho para quem quer o Node dentro do APK sem
-     * depender de rede na primeira abertura.
+     * Instala um runtime empacotado em `assets/node/`: aceita `.zip` ou
+     * `.tar.gz` com um `node` Bionic. É o caminho para quem quer o Node dentro
+     * do APK sem depender de rede na primeira abertura.
      */
     fun installFromAssets(force: Boolean = false, progress: (String) -> Unit = {}): Boolean {
         if (!force && isNodeInstalled()) return false
@@ -218,7 +276,7 @@ class NodeRuntime(context: Context) {
         }
         val candidates = names.filter { name ->
             val lower = name.lowercase()
-            lower.endsWith(".deb") || lower.endsWith(".zip") || lower.endsWith(".tar.gz") ||
+            lower.endsWith(".zip") || lower.endsWith(".tar.gz") ||
                 lower.endsWith(".tgz") || lower == "node" || lower.startsWith("node-")
         }
         if (candidates.isEmpty()) return false
@@ -230,11 +288,7 @@ class NodeRuntime(context: Context) {
                 app.assets.open("$ASSETS_NODE/$name").use { input ->
                     FileOutputStream(temporary).use { output -> input.copyTo(output) }
                 }
-                if (name.endsWith(".deb", ignoreCase = true) || Deb.isDeb(temporary)) {
-                    extractDebIntoPrefix(temporary, progress)
-                } else {
-                    installFile(temporary, progress)
-                }
+                installFile(temporary, progress)
                 writeLaunchers()
                 Log.i(TAG, "Runtime instalado a partir de assets/$name")
                 return true
@@ -245,12 +299,6 @@ class NodeRuntime(context: Context) {
             }
         }
         return false
-    }
-
-    /** Extrai o `.deb` do Termux direto no prefixo (mesmo código do downloader). */
-    private fun extractDebIntoPrefix(deb: File, progress: (String) -> Unit) {
-        progress("Extraindo ${deb.name}…")
-        TermuxPackages(this).installFromDeb(deb, progress)
     }
 
     /** Importa um executável, `.zip`, `.tar.gz` ou `.tgz` escolhido pelo usuário. */
@@ -334,6 +382,10 @@ class NodeRuntime(context: Context) {
         text.append('\n')
         text.append("HOME: ").append(home.absolutePath).append('\n')
         text.append("TMPDIR: ").append(tmp.absolutePath).append('\n')
+        text.append("OPENSSL_CONF: ").append(opensslConf.absolutePath)
+            .append(if (opensslConf.isFile) " (ok)" else " (ausente)").append('\n')
+        text.append("SSL_CERT_FILE: ").append(certFile.absolutePath)
+            .append(if (certFile.isFile) " (ok)" else " (ausente)").append('\n')
         text.append("NODE_PATH: ").append(modules.absolutePath).append('\n')
         text.append("PATH: ").append(environment()["PATH"]).append('\n')
         text.append("Shell: ")
@@ -364,12 +416,6 @@ class NodeRuntime(context: Context) {
     }
 
     private fun installFile(file: File, progress: (String) -> Unit): String {
-        // Pacote do Termux (ar + data.tar.xz): o caminho correto para Bionic.
-        if (Deb.isDeb(file)) {
-            progress("Extraindo ${file.name}…")
-            TermuxPackages(this).installFromDeb(file, progress)
-            return "Pacote ${file.name} extraído; node em ${nodeFile.absolutePath}"
-        }
         val magic = readMagic(file)
         return when {
             magic.size >= 2 && magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte() ->
@@ -454,11 +500,12 @@ class NodeRuntime(context: Context) {
         if (libraries.isEmpty()) return
         lib.mkdirs()
         for (library in libraries) {
-            val destination = File(lib, library.name)
-            try {
-                copy(library, destination)
-                makeExecutable(destination)
-            } catch (error: Exception) {
+                val destination = File(lib, library.name)
+                try {
+                    copy(library, destination)
+                    makeExecutable(destination)
+                    ElfPatcher.patchRunPath(destination)
+                } catch (error: Exception) {
                 Log.w(TAG, "Biblioteca ignorada: ${library.name} (${error.message})")
             }
         }
@@ -480,6 +527,7 @@ class NodeRuntime(context: Context) {
                     val target = File(lib, entry.name.substringAfterLast('/'))
                     FileOutputStream(target).use { output -> zip.copyTo(output) }
                     makeExecutable(target)
+                    ElfPatcher.patchRunPath(target)
                 }
                 zip.closeEntry()
             }
@@ -524,18 +572,7 @@ class NodeRuntime(context: Context) {
         }
     }
 
-    /** Baixa uma URL e devolve os bytes (índices de pacote, respostas pequenas). */
-    internal fun fetchBytes(url: String): ByteArray {
-        val temporary = File(tmp, "fetch-${System.currentTimeMillis()}")
-        return try {
-            download(url, temporary)
-            temporary.readBytes()
-        } finally {
-            temporary.delete()
-        }
-    }
-
-    /** Baixa uma URL para um arquivo (usado também pelo instalador do Termux). */
+    /** Baixa uma URL para um arquivo (runtime ou npm). */
     internal fun download(
         url: String,
         target: File,
