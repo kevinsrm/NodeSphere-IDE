@@ -37,6 +37,35 @@ Os arquivos ficam em `app/src/main/java/com/mobile/nodeide/` — o diretório pa
 3. Selecione o módulo `app` e execute. O projeto já segue o formato de um projeto *Empty Activity* (uma `MainActivity` + layouts XML em `res/layout`), só que com as telas extras em Fragments.
 4. Se o SmartIDE exigir um JDK embutido, use **JDK 17** (as versões de Kotlin/AGP acima não funcionam com JDK 11 ou anterior).
 
+### Se você criou um projeto *Empty Activity* novo no SmartIDE
+
+Criar o projeto primeiro também funciona: copie os arquivos deste repositório para dentro dele, exatamente nos mesmos caminhos.
+
+| Copiar | Para (no projeto novo) |
+| --- | --- |
+| `app/src/main/java/com/mobile/nodeide/*.kt` | `app/src/main/java/com/mobile/nodeide/` |
+| `app/src/main/res/layout/*.xml` | `app/src/main/res/layout/` (substituir `activity_main.xml` do template) |
+| `app/src/main/res/values/themes.xml`, `strings.xml` | `app/src/main/res/values/` |
+| `app/src/main/AndroidManifest.xml` | `app/src/main/` (manter a linha de permissão `INTERNET`) |
+
+No `app/build.gradle.kts` do projeto novo, o plugin `org.jetbrains.kotlin.android` já vem aplicado pelo template; basta garantir `jvmTarget` 17 e as dependências:
+
+```kotlin
+dependencies {
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.fragment:fragment:1.8.6")
+    implementation("androidx.recyclerview:recyclerview:1.4.0")
+    implementation("androidx.drawerlayout:drawerlayout:1.2.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.0.202406032230-r")
+    implementation("org.slf4j:slf4j-nop:2.0.13")
+    implementation("com.google.android.material:material:1.12.0")
+}
+```
+
+E, em `gradle.properties`, mantenha `android.useAndroidX=true` (sem isso o build falha por causa das dependências AndroidX). O `namespace` deve ser `com.mobile.nodeide` — igual ao `package` dos arquivos Kotlin.
+
 ## Disponível
 
 - Criação de projetos HTTP, API Express e Express fullstack em armazenamento privado, pesquisa e abertura de projetos. Importação de pasta ou arquivo via SAF cria uma cópia local (sem sincronização com o original). Clonagem HTTPS de repositórios públicos com JGit; autenticação de repositórios privados não está implementada.
