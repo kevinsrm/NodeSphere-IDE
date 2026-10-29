@@ -91,7 +91,7 @@ internal object SqliteConsoleDialog {
                 radius = dp(activity, 14)
             )
             isFillViewport = true
-            addView(result, ScrollView.LayoutParams(
+            addView(result, ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ))
