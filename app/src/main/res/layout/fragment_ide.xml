@@ -1,17 +1,147 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
-    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none"><LinearLayout android:id="toolbar" android:layout_width="wrap_content" android:layout_height="52dp" android:orientation="horizontal" android:background="#2c2953" /></HorizontalScrollView>
-    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none"><LinearLayout android:id="quick" android:layout_width="wrap_content" android:layout_height="44dp" android:orientation="horizontal" /></HorizontalScrollView>
-    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-        <androidx.recyclerview.widget.RecyclerView android:id="tree" android:layout_width="150dp" android:layout_height="match_parent" android:background="#2b294d" />
-        <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical">
-            <HorizontalScrollView android:layout_width="match_parent" android:layout_height="42dp"><LinearLayout android:id="tabs" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="horizontal" /></HorizontalScrollView>
-            <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true"><com.mobile.nodeide.CodeEditor android:id="editor" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="top|start" android:background="#20203d" android:padding="10dp" android:textColor="#e8e7fa" android:textSize="14sp" android:fontFamily="monospace" android:inputType="textMultiLine|textNoSuggestions" /></ScrollView>
-            <HorizontalScrollView android:layout_width="match_parent" android:layout_height="38dp"><LinearLayout android:id="symbols" android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="horizontal" /></HorizontalScrollView>
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/toolbar"
+            android:layout_width="wrap_content"
+            android:layout_height="52dp"
+            android:orientation="horizontal"
+            android:background="#2c2953" />
+    </HorizontalScrollView>
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/quick"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:orientation="horizontal" />
+    </HorizontalScrollView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/tree"
+            android:layout_width="150dp"
+            android:layout_height="match_parent"
+            android:background="#2b294d" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="42dp">
+
+                <LinearLayout
+                    android:id="@+id/tabs"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:fillViewport="true">
+
+                <com.mobile.nodeide.CodeEditor
+                    android:id="@+id/editor"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="top|start"
+                    android:background="#20203d"
+                    android:padding="10dp"
+                    android:textColor="#e8e7fa"
+                    android:textSize="14sp"
+                    android:fontFamily="monospace"
+                    android:inputType="textMultiLine|textNoSuggestions" />
+            </ScrollView>
+
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="38dp">
+
+                <LinearLayout
+                    android:id="@+id/symbols"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
         </LinearLayout>
     </LinearLayout>
-    <TextView android:id="handle" android:layout_width="match_parent" android:layout_height="24dp" android:gravity="center" android:text="━━  TERMINAL  ━━" android:textColor="#aaa6c2" android:background="#171723" />
-    <LinearLayout android:id="terminalPanel" android:layout_width="match_parent" android:layout_height="160dp" android:orientation="vertical" android:background="#13131c">
-        <ScrollView android:id="terminalScroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"><TextView android:id="output" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="8dp" android:textColor="#c6d7ca" android:fontFamily="monospace" android:textSize="12sp" /></ScrollView>
-        <LinearLayout android:layout_width="match_parent" android:layout_height="48dp"><EditText android:id="command" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:singleLine="true" android:hint="$ comando" android:textColor="#ffffff" android:textColorHint="#888888" android:textSize="13sp"/><Button android:id="execute" android:layout_width="wrap_content" android:layout_height="match_parent" android:text="▶" /></LinearLayout>
+
+    <TextView
+        android:id="@+id/handle"
+        android:layout_width="match_parent"
+        android:layout_height="24dp"
+        android:gravity="center"
+        android:text="━━  TERMINAL  ━━"
+        android:textColor="#aaa6c2"
+        android:background="#171723" />
+
+    <LinearLayout
+        android:id="@+id/terminalPanel"
+        android:layout_width="match_parent"
+        android:layout_height="160dp"
+        android:orientation="vertical"
+        android:background="#13131c">
+
+        <ScrollView
+            android:id="@+id/terminalScroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <TextView
+                android:id="@+id/output"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="8dp"
+                android:textColor="#c6d7ca"
+                android:fontFamily="monospace"
+                android:textSize="12sp" />
+        </ScrollView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp">
+
+            <EditText
+                android:id="@+id/command"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:singleLine="true"
+                android:hint="$ comando"
+                android:textColor="#ffffff"
+                android:textColorHint="#888888"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/execute"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:text="▶" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>
