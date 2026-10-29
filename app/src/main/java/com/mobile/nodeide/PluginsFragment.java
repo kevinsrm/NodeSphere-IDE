@@ -1,8 +1,0 @@
-package com.mobile.nodeide;
-import android.os.Bundle;import android.view.*;import android.widget.*;import android.text.*;import androidx.annotation.*;import androidx.fragment.app.Fragment;import androidx.recyclerview.widget.*;import java.util.*;
-public class PluginsFragment extends Fragment {
-    final String[] names={"Node.js", "npm", "Terminal Android", "SQLite", "MariaDB", "MySQL"}; final String[] descriptions={"Runtime externo necessário; não incluído", "Requer Node.js e npm externos", "Shell do Android disponível no editor", "Motor SQLite nativo do Android; CLI não incluída", "Runtime não incluído", "Runtime não incluído"};
-    Rows rows; List<Integer> matches=new ArrayList<>();
-    public View onCreateView(@NonNull LayoutInflater i,ViewGroup c,Bundle b){View v=i.inflate(R.layout.fragment_list,c,false);((TextView)v.findViewById(R.id.title)).setText("Plugins & runtimes");EditText s=v.findViewById(R.id.search);s.setHint("Pesquisar plugins");RecyclerView l=v.findViewById(R.id.list);l.setLayoutManager(new LinearLayoutManager(requireContext()));rows=new Rows(n->Toast.makeText(getContext(),descriptions[matches.get(n)],Toast.LENGTH_LONG).show());l.setAdapter(rows);((Button)v.findViewById(R.id.action)).setVisibility(View.GONE);s.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int before,int count){refresh(s.toString());}public void afterTextChanged(Editable e){}});refresh("");return v;}
-    void refresh(String q){matches.clear();List<String> l=new ArrayList<>();for(int n=0;n<names.length;n++)if(names[n].toLowerCase(Locale.ROOT).contains(q.toLowerCase(Locale.ROOT))){matches.add(n);l.add("✣   "+names[n]+"\n      "+descriptions[n]);}rows.set(l);}
-}

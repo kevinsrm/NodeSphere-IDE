@@ -1,10 +1,70 @@
 # NodeSphere IDE
 
-Protótipo Android nativo em Java, XML, Fragments e RecyclerView, inspirado em IDEs mobile. Usa `compileSdk = 36`, `targetSdk = 36` e `com.mobile.nodeide`. É uma base funcional, **não uma implementação completa de todos os recursos de uma IDE**.
+Protótipo Android nativo escrito **100% em Kotlin**, com XML, Fragments e RecyclerView, inspirado em IDEs mobile. Usa `compileSdk = 36`, `targetSdk = 36`, `minSdk = 26` e o pacote `com.mobile.nodeide`. É uma base funcional, **não uma implementação completa de todos os recursos de uma IDE**.
 
-## Compilação
+## Linguagem: Kotlin
 
-Instale JDK 17 e Android SDK 36, configure `ANDROID_HOME` ou `local.properties`, e execute `./gradlew assembleDebug`. O wrapper baixa Gradle 8.11.1; são necessários acesso aos repositórios Google/Maven e ao serviço de distribuição do Gradle. O APK fica em `app/build/outputs/apk/debug/`.
+Todo o código-fonte foi convertido de Java para Kotlin; não há mais arquivos `.java` no projeto.
+
+| Arquivo | Papel |
+| --- | --- |
+| `MainActivity.kt` | Activity única (padrão *Empty Activity*), navegação inferior e acesso aos arquivos |
+| `ProjectsFragment.kt` | Criação, importação (SAF) e clonagem de projetos |
+| `IdeFragment.kt` | Editor: árvore, abas, símbolos, undo/redo e shell persistente |
+| `CodeEditor.kt` | `AppCompatEditText` com realce lexical e autocompletar |
+| `AgentFragment.kt` | Chat compatível com OpenAI e ferramentas com aprovação |
+| `PluginsFragment.kt` | Lista informativa de plugins e runtimes |
+| `Rows.kt` | `RecyclerView.Adapter` genérico de linhas de texto |
+
+Os arquivos ficam em `app/src/main/java/com/mobile/nodeide/` — o diretório padrão do template Android (o AGP compila Kotlin nesse caminho, então a estrutura continua igual à do *Empty Activity*).
+
+### Build
+
+- Kotlin **2.1.0** (`org.jetbrains.kotlin.android`), AGP **8.9.2**, Gradle **8.11.1** (wrapper).
+- JDK **17** (`compileOptions` e `jvmTarget` 17).
+- `gradle.properties` já traz `android.useAndroidX=true` e `kotlin.code.style=official`.
+
+```bash
+./gradlew assembleDebug   # APK em app/build/outputs/apk/debug/
+```
+
+É necessário acesso aos repositórios Google/Maven e ao serviço de distribuição do Gradle (o wrapper baixa o Gradle 8.11.1 e o plugin Kotlin 2.1.0 na primeira sincronização).
+
+### Abrir no SmartIDE
+
+1. Abra **esta pasta do projeto** no SmartIDE — não crie outro projeto *Empty Activity* por cima, para não perder o código.
+2. Deixe o SmartIDE sincronizar o Gradle; ele baixa AGP 8.9.2, Kotlin 2.1.0 e as dependências AndroidX.
+3. Selecione o módulo `app` e execute. O projeto já segue o formato de um projeto *Empty Activity* (uma `MainActivity` + layouts XML em `res/layout`), só que com as telas extras em Fragments.
+4. Se o SmartIDE exigir um JDK embutido, use **JDK 17** (as versões de Kotlin/AGP acima não funcionam com JDK 11 ou anterior).
+
+### Se você criou um projeto *Empty Activity* novo no SmartIDE
+
+Criar o projeto primeiro também funciona: copie os arquivos deste repositório para dentro dele, exatamente nos mesmos caminhos.
+
+| Copiar | Para (no projeto novo) |
+| --- | --- |
+| `app/src/main/java/com/mobile/nodeide/*.kt` | `app/src/main/java/com/mobile/nodeide/` |
+| `app/src/main/res/layout/*.xml` | `app/src/main/res/layout/` (substituir `activity_main.xml` do template) |
+| `app/src/main/res/values/themes.xml`, `strings.xml` | `app/src/main/res/values/` |
+| `app/src/main/AndroidManifest.xml` | `app/src/main/` (manter a linha de permissão `INTERNET`) |
+
+No `app/build.gradle.kts` do projeto novo, o plugin `org.jetbrains.kotlin.android` já vem aplicado pelo template; basta garantir `jvmTarget` 17 e as dependências:
+
+```kotlin
+dependencies {
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.fragment:fragment:1.8.6")
+    implementation("androidx.recyclerview:recyclerview:1.4.0")
+    implementation("androidx.drawerlayout:drawerlayout:1.2.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.0.202406032230-r")
+    implementation("org.slf4j:slf4j-nop:2.0.13")
+    implementation("com.google.android.material:material:1.12.0")
+}
+```
+
+E, em `gradle.properties`, mantenha `android.useAndroidX=true` (sem isso o build falha por causa das dependências AndroidX). O `namespace` deve ser `com.mobile.nodeide` — igual ao `package` dos arquivos Kotlin.
 
 ## Disponível
 
@@ -16,5 +76,7 @@ Instale JDK 17 e Android SDK 36, configure `ANDROID_HOME` ou `local.properties`,
 ## Limitações importantes
 
 Node.js, npm, MariaDB, MySQL, Git e uma distribuição Linux **não estão incluídos nem são instalados pela tela de plugins**. O Android disponibiliza SQLite como API, mas não há cliente ou gerenciamento de banco nesta versão. Em aparelhos comuns `node`, `npm` e `git` não existirão no shell; executar o projeto Node requer uma integração de runtime nativo adequada à ABI e às restrições do Android. A tela de plugins informa essa situação, não instala pacotes. PTY, debugger, autocomplete semântico e instalação de runtimes são trabalho futuro. O realce é lexical genérico, não um parser completo para JS/TS/HTML/CSS/JSON/Markdown/EJS/Handlebars.
+
+A clonagem depende do JGit, que requer APIs Java nem sempre disponíveis em Android; se a clonagem falhar em algum aparelho, use a importação por pasta.
 
 O agente usa apenas o protocolo OpenAI-compatible; os endpoints predefinidos dependem de conta, modelo e suporte a tool calling do provedor. O protocolo nativo Anthropic/Claude não está implementado. Não há streaming de tokens: ações e resultados são apresentados conforme cada chamada termina. Não conceda aprovação a comandos que não compreenda.
