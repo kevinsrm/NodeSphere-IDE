@@ -124,7 +124,7 @@ class IdeFragment : Fragment() {
                 when (symbol) {
                     "←" -> editor.setSelection(maxOf(0, start - 1))
                     "→" -> editor.setSelection(minOf(editor.length(), start + 1))
-                    else -> editor.text.insert(start, symbol)
+                    else -> editor.text?.insert(start, symbol)
                 }
             }
         }
