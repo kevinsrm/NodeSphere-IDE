@@ -26,7 +26,7 @@ import java.util.zip.GZIPInputStream
  * 3. baixar cada `.deb`, extrair o `data.tar.xz` e copiar o prefixo
  *    `data/data/com.termux/files/usr/...` para o prefixo do app
  *    (`files/usr/bin`, `files/usr/lib`, ...);
- * 4. marcar `bin/*` e `lib/*.so` com permissão de execução.
+ * 4. marcar os arquivos de `bin` e os `.so` de `lib` com permissão de execução.
  *
  * O resultado é exatamente o layout que [NodeRuntime] espera (`files/usr/bin/node`).
  */
@@ -105,7 +105,7 @@ class TermuxPackages(private val runtime: NodeRuntime) {
     }
 
     /**
-     * Reescreve o `RUNPATH` de `bin/*` e `lib/*` para `$ORIGIN/../lib`.
+     * Reescreve o `RUNPATH` dos arquivos de `bin` e de `lib` para `$ORIGIN/../lib`.
      *
      * Os binários do Termux procuram as bibliotecas em
      * `/data/data/com.termux/files/usr/lib`. Sem este ajuste o `node` extraído
