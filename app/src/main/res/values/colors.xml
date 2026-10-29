@@ -2,5 +2,8 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="purple_500">#FF6650a4</color>
+    <color name="purple_500">#FF7869D6</color>
+    <color name="surface_ide">#FF0B1020</color>
+    <color name="accent_primary">#FF9B8CFF</color>
+    <color name="accent_teal">#FF59D4C5</color>
 </resources>

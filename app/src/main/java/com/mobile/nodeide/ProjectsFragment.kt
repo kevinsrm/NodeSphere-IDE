@@ -32,7 +32,7 @@ import java.util.Locale
 class ProjectsFragment : Fragment() {
 
     private lateinit var main: MainActivity
-    private lateinit var rows: Rows
+    private lateinit var rows: ProjectRows
     private val files = mutableListOf<File>()
     private var filter = ""
 
@@ -43,10 +43,13 @@ class ProjectsFragment : Fragment() {
     ): View {
         val view = inflater.inflate(R.layout.fragment_list, container, false)
         main = requireActivity() as MainActivity
-        view.findViewById<TextView>(R.id.title).text = "NodeSphere   ✦"
+        view.findViewById<TextView>(R.id.eyebrow).text = "NODESPHERE  /  WORKSPACE"
+        view.findViewById<TextView>(R.id.title).text = "Projetos"
+        view.findViewById<TextView>(R.id.subtitle).text =
+            "Continue de onde parou ou prepare um novo projeto."
 
         val search = view.findViewById<EditText>(R.id.search)
-        search.hint = "Pesquisar projetos recentes"
+        search.hint = "Pesquisar projetos"
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -58,11 +61,11 @@ class ProjectsFragment : Fragment() {
 
         val list = view.findViewById<RecyclerView>(R.id.list)
         list.layoutManager = LinearLayoutManager(main)
-        rows = Rows { position -> main.openProject(files[position]) }
+        rows = ProjectRows { project -> main.openProject(project) }
         list.adapter = rows
 
         val action = view.findViewById<Button>(R.id.action)
-        action.text = "＋  Projeto / importar / clonar"
+        action.text = "＋  Novo projeto / importar"
         action.setOnClickListener { actions() }
 
         refresh()
@@ -82,8 +85,7 @@ class ProjectsFragment : Fragment() {
                 }
             }
         }
-        val labels = files.map { "⬡   ${it.name}\n      ~/projects/${it.name}" }
-        rows.set(labels)
+        rows.set(files)
     }
 
     private fun actions() {
@@ -108,7 +110,10 @@ class ProjectsFragment : Fragment() {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 0, 24, 0)
         }
-        val input = EditText(main).apply { hint = "nome-do-projeto" }
+        val input = EditText(main).apply {
+            hint = "nome-do-projeto"
+            setSingleLine(true)
+        }
         val type = Spinner(main)
         val templates = arrayOf("Servidor HTTP", "API Express", "Express fullstack")
         type.adapter = ArrayAdapter(main, android.R.layout.simple_spinner_dropdown_item, templates)
@@ -117,72 +122,29 @@ class ProjectsFragment : Fragment() {
 
         AlertDialog.Builder(main)
             .setTitle("Novo projeto Node.js")
+            .setMessage("Os arquivos serão preparados antes de abrir o editor.")
             .setView(box)
             .setPositiveButton("Criar") { _, _ ->
                 val name = input.text.toString().trim()
-                if (!validName(name)) {
+                if (!ProjectScaffolder.isValidName(name)) {
                     main.message("Nome inválido: use letras, números, ponto, hífen ou sublinhado")
                     return@setPositiveButton
                 }
-                val directory = File(main.projects(), name)
-                if (directory.exists()) {
-                    main.message("Projeto já existe")
-                    return@setPositiveButton
-                }
                 try {
-                    if (!directory.mkdir()) throw IOException("Não foi possível criar projeto")
-                    writeTemplate(directory, name, type.selectedItemPosition)
+                    val directory = ProjectScaffolder.create(
+                        main.projects(),
+                        name,
+                        type.selectedItemPosition
+                    )
+                    refresh()
                     main.openProject(directory)
-                } catch (e: IOException) {
-                    main.message(e.message ?: "Falha ao criar projeto")
+                } catch (error: Exception) {
+                    main.message(error.message ?: "Falha ao criar projeto")
                 }
             }
             .setNegativeButton("Cancelar", null)
             .show()
     }
-
-    private fun writeTemplate(directory: File, name: String, template: Int) {
-        val dependencies = if (template == 0) {
-            ""
-        } else {
-            " ,\n  \"dependencies\": { \"express\": \"^4.21.2\" }"
-        }
-        val packageJson = "{\n  \"name\": \"${name.lowercase(Locale.ROOT)}\",\n  \"version\": \"1.0.0\",\n" +
-            "  \"scripts\": { \"start\": \"node server.js\" }$dependencies\n}\n"
-        MainActivity.write(File(directory, "package.json"), packageJson)
-
-        val routes = if (template == 2) {
-            "app.use(express.static('public'));\n"
-        } else {
-            "app.get('/', (req, res) => res.json({ ok: true }));\n"
-        }
-        val server = if (template == 0) {
-            "const http = require('http');\n" +
-                "http.createServer((req, res) => {\n" +
-                "  res.writeHead(200, { 'Content-Type': 'text/plain' });\n" +
-                "  res.end('Hello from NodeSphere!');\n" +
-                "}).listen(3000);\n"
-        } else {
-            "const express = require('express');\n" +
-                "const app = express();\n" +
-                "app.use(express.json());\n" +
-                routes +
-                "app.listen(3000, () => console.log('Listening on port 3000'));\n"
-        }
-        MainActivity.write(File(directory, "server.js"), server)
-
-        if (template == 2) {
-            MainActivity.write(
-                File(directory, "public/index.html"),
-                "<!doctype html>\n" +
-                    "<html><head><meta charset=\"utf-8\"><title>NodeSphere</title></head>" +
-                    "<body><h1>Olá, Node.js!</h1></body></html>\n"
-            )
-        }
-    }
-
-    private fun validName(name: String): Boolean =
-        name.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}"))
 
     override fun onActivityResult(request: Int, result: Int, data: Intent?) {
         super.onActivityResult(request, result, data)
@@ -208,7 +170,7 @@ class ProjectsFragment : Fragment() {
             .setView(input)
             .setPositiveButton("Importar") { _, _ ->
                 val value = input.text.toString().trim()
-                if (!validName(value) || File(main.projects(), value).exists()) {
+                if (!ProjectScaffolder.isValidName(value) || File(main.projects(), value).exists()) {
                     main.message("Nome inválido ou já existente")
                     return@setPositiveButton
                 }
@@ -287,7 +249,7 @@ class ProjectsFragment : Fragment() {
                 val remote = url.text.toString().trim()
                 val localName = name.text.toString().trim()
                 val destination = File(main.projects(), localName)
-                if (!remote.startsWith("https://") || !validName(localName) || destination.exists()) {
+                if (!remote.startsWith("https://") || !ProjectScaffolder.isValidName(localName) || destination.exists()) {
                     main.message("URL HTTPS ou nome inválido, ou projeto existente")
                     return@setPositiveButton
                 }
