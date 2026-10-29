@@ -134,7 +134,7 @@ class MainActivity : AppCompatActivity() {
         Thread({
             try {
                 runtime.prepare()
-                runtime.installBundled()
+                if (!runtime.installBundled()) runtime.installFromAssets()
                 if (runtime.isNodeInstalled() && !runtime.isNpmInstalled()) {
                     runtime.installNpm()
                 }
