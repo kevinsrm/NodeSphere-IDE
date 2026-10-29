@@ -13,8 +13,12 @@ Todo o código-fonte foi convertido de Java para Kotlin; não há mais arquivos 
 | `IdeFragment.kt` | Editor: árvore, abas, símbolos, undo/redo e shell persistente |
 | `CodeEditor.kt` | `AppCompatEditText` com realce lexical e autocompletar |
 | `AgentFragment.kt` | Chat compatível com OpenAI e ferramentas com aprovação |
-| `PluginsFragment.kt` | Lista informativa de plugins e runtimes |
-| `Rows.kt` | `RecyclerView.Adapter` genérico de linhas de texto |
+| `PluginsFragment.kt` | Catálogo de integrações Android e runtimes externos |
+| `PluginRows.kt` | Cartões de runtime com marcas, estados e ações |
+| `ProjectRows.kt` | Cartões da lista de projetos |
+| `ProjectScaffolder.kt` | Criação transacional dos templates de projeto |
+| `SqliteConsoleDialog.kt` | Console SQL usando o SQLite nativo do Android |
+| `Rows.kt` | `RecyclerView.Adapter` da árvore de arquivos |
 
 Os arquivos ficam em `app/src/main/java/com/mobile/nodeide/` — o diretório padrão do template Android (o AGP compila Kotlin nesse caminho, então a estrutura continua igual à do *Empty Activity*).
 
@@ -70,14 +74,16 @@ E, em `gradle.properties`, mantenha `android.useAndroidX=true` (sem isso o build
 
 ## Disponível
 
-- Criação de projetos HTTP, API Express e Express fullstack em armazenamento privado, pesquisa e abertura de projetos. Importação de pasta ou arquivo via SAF cria uma cópia local (sem sincronização com o original). Clonagem HTTPS de repositórios públicos com JGit; autenticação de repositórios privados não está implementada.
+- Criação de projetos HTTP, API Express e Express fullstack em armazenamento privado. Os arquivos são escritos em uma pasta temporária e só aparecem no workspace depois que o template termina; o `package.json` é gerado por `JSONObject`. Pesquisa, abertura, importação SAF (cópia local) e clonagem HTTPS de repositórios públicos com JGit.
+- Catálogo visual de plugins com ícones de marca e estado explícito. Terminal Android e console SQLite têm ações funcionais; o console SQLite cria `nodesphere.sqlite` no projeto e executa consultas/comandos SQL.
+- Interface escura redesenhada e compatível com edge-to-edge: os insets de status, navegação e teclado são aplicados ao conteúdo, sem desenhar títulos por trás das barras do sistema.
 - Editor com árvore expansível, abas, criação e salvamento de arquivos, pesquisa, destaque lexical básico e barra de símbolos. Alterações são salvas ao trocar de arquivo ou sair da tela. O controle de autocompletar habilita sugestões básicas de palavras-chave, sem análise semântica. Undo/redo mantém até 100 estados do arquivo atual e é reiniciado ao trocar de arquivo.
 - Painel redimensionável que executa comandos com `/system/bin/sh` no diretório do projeto, exibindo saída. O shell persiste enquanto o editor está aberto, permitindo `cd` e entrada de dados; não é um terminal PTY e programas que exigem controle de terminal podem não funcionar. O botão Parar encerra o shell, mas não garante encerrar processos filhos.
 - Chat com endpoint HTTPS **OpenAI-compatible** `/chat/completions`, histórico em memória e ferramentas para listar, ler, gravar e excluir arquivos e executar comandos. Cada chamada exige aprovação do usuário; comandos são encerrados após 30 segundos. Os caminhos das ferramentas de arquivo são limitados ao projeto, mas comandos shell têm as permissões normais do aplicativo e não são confinados ao projeto. Use apenas provedores confiáveis; conteúdo do projeto e resultados das ferramentas são enviados ao provedor. A chave fica nas preferências privadas sem criptografia; backup do aplicativo está desativado.
 
 ## Limitações importantes
 
-Node.js, npm, MariaDB, MySQL, Git e uma distribuição Linux **não estão incluídos nem são instalados pela tela de plugins**. O Android disponibiliza SQLite como API, mas não há cliente ou gerenciamento de banco nesta versão. Em aparelhos comuns `node`, `npm` e `git` não existirão no shell; executar o projeto Node requer uma integração de runtime nativo adequada à ABI e às restrições do Android. A tela de plugins informa essa situação, não instala pacotes. PTY, debugger, autocomplete semântico e instalação de runtimes são trabalho futuro. O realce é lexical genérico, não um parser completo para JS/TS/HTML/CSS/JSON/Markdown/EJS/Handlebars.
+Node.js, npm, MariaDB e MySQL **não estão incluídos e ainda não podem ser instalados pelo catálogo**. O catálogo deixa isso explícito em vez de simular uma instalação. Node/npm requerem uma distribuição Android compatível com a ABI e o sandbox; MariaDB/MySQL requerem um servidor externo e um conector, ainda não integrados. Terminal Android e SQLite são nativos; o console SQLite trabalha com um arquivo dentro do projeto. Em aparelhos comuns, `node`, `npm` e `git` não existirão no shell. PTY, debugger e autocomplete semântico seguem como trabalho futuro. O realce é lexical genérico, não um parser completo para JS/TS/HTML/CSS/JSON/Markdown/EJS/Handlebars.
 
 A clonagem depende do JGit, que requer APIs Java nem sempre disponíveis em Android; se a clonagem falhar em algum aparelho, use a importação por pasta.
 

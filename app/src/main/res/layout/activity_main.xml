@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/appRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="#242242">
+    android:background="#0B1020"
+    android:orientation="vertical">
 
     <FrameLayout
         android:id="@+id/content"
@@ -11,11 +13,15 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
-    <LinearLayout
+    <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/navigation"
         android:layout_width="match_parent"
-        android:layout_height="64dp"
-        android:orientation="horizontal"
-        android:background="#1c1a24"
-        android:gravity="center" />
+        android:layout_height="72dp"
+        android:background="#101629"
+        android:elevation="12dp"
+        app:itemIconTint="@color/navigation_item_tint"
+        app:itemTextColor="@color/navigation_item_tint"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_navigation"
+        app:itemHorizontalTranslationEnabled="false" />
 </LinearLayout>

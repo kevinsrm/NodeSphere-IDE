@@ -1,14 +1,12 @@
 package com.mobile.nodeide
 
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
-/**
- * Adapter genérico de linhas de texto usado nas listas de projetos,
- * plugins e na árvore de arquivos do editor.
- */
+/** Compact clickable rows used for the editor's project tree. */
 class Rows(private val click: (Int) -> Unit) : RecyclerView.Adapter<Rows.Holder>() {
 
     private val items = mutableListOf<String>()
@@ -20,11 +18,26 @@ class Rows(private val click: (Int) -> Unit) : RecyclerView.Adapter<Rows.Holder>
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
-        val text = TextView(parent.context).apply {
-            setTextColor(Color.rgb(225, 222, 239))
-            textSize = 15f
-            setPadding(12, 16, 8, 16)
-            setBackgroundColor(Color.rgb(43, 41, 76))
+        val context = parent.context
+        val density = context.resources.displayMetrics.density
+        val text = TextView(context).apply {
+            setTextColor(Color.rgb(220, 226, 242))
+            textSize = 13f
+            setPadding((12 * density).toInt(), (10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt())
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 12 * density
+                setColor(Color.rgb(17, 24, 42))
+            }
+            layoutParams = RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                leftMargin = (5 * density).toInt()
+                rightMargin = (5 * density).toInt()
+                topMargin = (3 * density).toInt()
+                bottomMargin = (3 * density).toInt()
+            }
         }
         return Holder(text)
     }

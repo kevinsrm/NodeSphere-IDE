@@ -52,14 +52,14 @@ class AgentFragment : Fragment() {
 
         val root = LinearLayout(main).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(16, 16, 16, 8)
-            setBackgroundColor(0xff101117.toInt())
+            setPadding(20, 18, 20, 12)
+            setBackgroundColor(0xff0b1020.toInt())
         }
 
         val title = TextView(main).apply {
             text = "✦  AI Agent"
             setTextColor(0xfff2efff.toInt())
-            textSize = 24f
+            textSize = 28f
         }
         root.addView(title)
 

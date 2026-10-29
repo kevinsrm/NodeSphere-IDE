@@ -79,6 +79,10 @@ class IdeFragment : Fragment() {
         panel = root.findViewById(R.id.terminalPanel)
         output = root.findViewById(R.id.output)
         command = root.findViewById(R.id.command)
+        if (arguments?.getBoolean(ARG_OPEN_TERMINAL, false) == true) {
+            panel.visibility = View.VISIBLE
+            command.post { command.requestFocus() }
+        }
 
         tree.layoutManager = LinearLayoutManager(main)
         rows = Rows { position ->
@@ -408,5 +412,13 @@ class IdeFragment : Fragment() {
     override fun onPause() {
         save()
         super.onPause()
+    }
+
+    companion object {
+        private const val ARG_OPEN_TERMINAL = "open_terminal"
+
+        fun newInstance(openTerminal: Boolean = false) = IdeFragment().apply {
+            arguments = Bundle().apply { putBoolean(ARG_OPEN_TERMINAL, openTerminal) }
+        }
     }
 }
