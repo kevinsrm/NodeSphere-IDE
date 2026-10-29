@@ -468,42 +468,46 @@ class TerminalSession(
     /** Separa a saída real do marcador que revela o `cwd`. Roda na thread principal. */
     private fun consume(chunk: String) {
         if (closed) return
-        pending.append(chunk)
-        while (true) {
-            val marker = pending.indexOf(MARKER)
-            if (marker < 0) {
-                val keep = partialMarker()
-                val length = pending.length - keep
-                if (length <= 0) return
-                emit(pending.substring(0, length))
-                pending.delete(0, length)
-                return
+        try {
+            pending.append(chunk)
+            while (true) {
+                val marker = pending.indexOf(MARKER)
+                if (marker < 0) {
+                    val keep = partialMarker()
+                    val length = pending.length - keep
+                    if (length <= 0) return
+                    emit(pending.substring(0, length))
+                    pending.delete(0, length)
+                    return
+                }
+                if (marker > 0) {
+                    emit(pending.substring(0, marker))
+                    pending.delete(0, marker)
+                }
+                val newline = pending.indexOf("\n")
+                if (newline < 0) return
+                val payload = pending.substring(MARKER.length, newline).trim()
+                pending.delete(0, newline + 1)
+                val parts = payload.split(' ')
+                val path = parts.firstOrNull().orEmpty()
+                if (path.startsWith("/")) {
+                    val candidate = File(path)
+                    if (candidate.isDirectory) directory = candidate
+                }
+                val reported = parts.getOrNull(1)?.toIntOrNull()
+                if (reported != null && reported > 0) shellPid = reported
+                executing = false
+                if (!afterNewline) emit("\r\n")
+                if (queue.isNotEmpty()) {
+                    execute(queue.removeAt(0), echo = true)
+                } else if (!closed) {
+                    promptText = prompt()
+                    emit(promptText)
+                    if (command.isNotEmpty()) redraw()
+                }
             }
-            if (marker > 0) {
-                emit(pending.substring(0, marker))
-                pending.delete(0, marker)
-            }
-            val newline = pending.indexOf("\n")
-            if (newline < 0) return
-            val payload = pending.substring(MARKER.length, newline).trim()
-            pending.delete(0, newline + 1)
-            val parts = payload.split(' ')
-            val path = parts.firstOrNull().orEmpty()
-            if (path.startsWith("/")) {
-                val candidate = File(path)
-                if (candidate.isDirectory) directory = candidate
-            }
-            val reported = parts.getOrNull(1)?.toIntOrNull()
-            if (reported != null && reported > 0) shellPid = reported
-            executing = false
-            if (!afterNewline) emit("\r\n")
-            if (queue.isNotEmpty()) {
-                execute(queue.removeAt(0), echo = true)
-            } else if (!closed) {
-                promptText = prompt()
-                emit(promptText)
-                if (command.isNotEmpty()) redraw()
-            }
+        } catch (error: Exception) {
+            Log.e(TAG, "Erro ao processar buffer do terminal: ${error.message}", error)
         }
     }
 

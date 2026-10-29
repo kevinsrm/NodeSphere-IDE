@@ -21,10 +21,7 @@ import java.util.regex.Pattern
  * autocompletar de palavras-chave, sem servidor de linguagem (language server).
  *
  * O realce é tolerante a falhas de propósito: as expressões regulares são
- * compiladas uma única vez, com atraso (debounce) e dentro de try/catch. Em
- * aparelhos cujo motor de regex é o ICU (Android), uma expressão inválida
- * lançava `PatternSyntaxException` dentro do `TextWatcher` e derrubava o editor
- * ao abrir um arquivo ou digitar. Agora a regra inválida é descartada.
+ * compiladas com proteção total e executadas de forma segura com try/catch.
  */
 class CodeEditor @JvmOverloads constructor(
     context: Context,
@@ -77,7 +74,7 @@ class CodeEditor @JvmOverloads constructor(
         filename = name
         cachedLanguage = ""
         dismiss()
-        highlight(editableText)
+        scheduleHighlight()
     }
 
     fun setCompletionEnabled(enabled: Boolean) {
@@ -94,52 +91,68 @@ class CodeEditor @JvmOverloads constructor(
     fun isLineNumbersEnabled(): Boolean = lineNumbersEnabled
 
     private fun dismiss() {
-        popup?.dismiss()
-        popup = null
+        try {
+            popup?.dismiss()
+            popup = null
+        } catch (_: Exception) {
+        }
     }
 
     /** Reagenda o realce para não rodar a cada tecla em arquivos grandes. */
     private fun scheduleHighlight() {
         removeCallbacks(highlightTask)
-        if (isAttachedToWindow) postDelayed(highlightTask, HIGHLIGHT_DELAY) else highlightTask.run()
+        if (isAttachedToWindow) postDelayed(highlightTask, HIGHLIGHT_DELAY) else post(highlightTask)
     }
 
     /** Reserva o espaço da coluna de números e empurra o texto para a direita. */
     private fun updateGutter() {
-        val wanted = if (!lineNumbersEnabled) {
-            0f
-        } else {
-            numberPaint.textSize = textSize
-            val digits = maxOf(2, lineCount.toString().length)
-            digits * numberPaint.measureText("0") + GUTTER_PADDING * 2f
+        try {
+            val wanted = if (!lineNumbersEnabled) {
+                0f
+            } else {
+                numberPaint.textSize = textSize
+                val digits = maxOf(2, lineCount.toString().length)
+                digits * numberPaint.measureText("0") + GUTTER_PADDING * 2f
+            }
+            if (wanted == gutterWidth) return
+            gutterWidth = wanted
+            setPadding(basePaddingLeft + wanted.toInt(), paddingTop, paddingRight, paddingBottom)
+        } catch (e: Exception) {
+            Log.w(TAG, "Erro ao atualizar gutter: ${e.message}")
         }
-        if (wanted == gutterWidth) return
-        gutterWidth = wanted
-        setPadding(basePaddingLeft + wanted.toInt(), paddingTop, paddingRight, paddingBottom)
     }
 
     override fun onDraw(canvas: Canvas) {
-        val showGutter = lineNumbersEnabled && gutterWidth > 0f
-        if (showGutter) {
-            canvas.drawRect(0f, 0f, gutterWidth, height.toFloat(), gutterBackground)
-            canvas.drawRect(gutterWidth - 1f, 0f, gutterWidth, height.toFloat(), gutterDivider)
+        try {
+            val showGutter = lineNumbersEnabled && gutterWidth > 0f
+            if (showGutter) {
+                canvas.drawRect(0f, 0f, gutterWidth, height.toFloat(), gutterBackground)
+                canvas.drawRect(gutterWidth - 1f, 0f, gutterWidth, height.toFloat(), gutterDivider)
+            }
+            super.onDraw(canvas)
+            if (showGutter) drawLineNumbers(canvas)
+        } catch (e: Exception) {
+            Log.w(TAG, "Erro em onDraw: ${e.message}")
         }
-        super.onDraw(canvas)
-        if (showGutter) drawLineNumbers(canvas)
     }
 
     private fun drawLineNumbers(canvas: Canvas) {
-        val textLayout = layout ?: return
-        val offset = extendedPaddingTop - scrollY
-        val bottom = height.toFloat()
-        var line = textLayout.getLineForVertical(maxOf(0, scrollY))
-        while (line < textLayout.lineCount) {
-            val baseline = (textLayout.getLineBaseline(line) + offset).toFloat()
-            if (baseline > bottom + textSize) break
-            val label = (line + 1).toString()
-            val x = gutterWidth - GUTTER_PADDING - numberPaint.measureText(label)
-            canvas.drawText(label, x, baseline, numberPaint)
-            line++
+        try {
+            val textLayout = layout ?: return
+            val offset = extendedPaddingTop - scrollY
+            val bottom = height.toFloat()
+            val startLine = textLayout.getLineForVertical(maxOf(0, scrollY)).coerceIn(0, (textLayout.lineCount - 1).coerceAtLeast(0))
+            var line = startLine
+            while (line < textLayout.lineCount) {
+                val baseline = (textLayout.getLineBaseline(line) + offset).toFloat()
+                if (baseline > bottom + textSize) break
+                val label = (line + 1).toString()
+                val x = gutterWidth - GUTTER_PADDING - numberPaint.measureText(label)
+                canvas.drawText(label, x, baseline, numberPaint)
+                line++
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Erro ao desenhar números de linha: ${e.message}")
         }
     }
 
@@ -174,7 +187,9 @@ class CodeEditor @JvmOverloads constructor(
             val begin = start
             val finish = end
             list.setOnItemClickListener { _, _, position, _ ->
-                if (selectionStart == finish) content.replace(begin, finish, matches[position])
+                if (selectionStart == finish && position in matches.indices) {
+                    content.replace(begin, finish, matches[position])
+                }
                 dismiss()
             }
 
@@ -194,23 +209,30 @@ class CodeEditor @JvmOverloads constructor(
         if (coloring || e == null) return
         if (e.length > MAX_HIGHLIGHT) return
         coloring = true
-        beginBatchEdit()
         try {
-            for (span in e.getSpans(0, e.length, ForegroundColorSpan::class.java)) e.removeSpan(span)
+            val textString = e.toString()
+            for (span in e.getSpans(0, e.length, ForegroundColorSpan::class.java)) {
+                e.removeSpan(span)
+            }
             for (rule in rules()) {
-                val matcher = rule.pattern.matcher(e)
+                val matcher = rule.pattern.matcher(textString)
                 while (matcher.find()) {
-                    e.setSpan(
-                        ForegroundColorSpan(rule.color),
-                        matcher.start(),
-                        matcher.end(),
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                    )
+                    val start = matcher.start().coerceIn(0, e.length)
+                    val end = matcher.end().coerceIn(0, e.length)
+                    if (end > start) {
+                        e.setSpan(
+                            ForegroundColorSpan(rule.color),
+                            start,
+                            end,
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                        )
+                    }
                 }
             }
+        } catch (error: Throwable) {
+            Log.w(TAG, "Realce ignorado: ${error.message}")
         } finally {
             coloring = false
-            endBatchEdit()
         }
     }
 
@@ -262,7 +284,7 @@ class CodeEditor @JvmOverloads constructor(
     private class Rule(val pattern: Pattern, val color: Int)
 
     private companion object {
-        const val TAG = "NodeSphere"
+        const val TAG = "CodeEditor"
         const val HIGHLIGHT_DELAY = 140L
         const val MAX_HIGHLIGHT = 60_000
         const val GUTTER_PADDING = 9f

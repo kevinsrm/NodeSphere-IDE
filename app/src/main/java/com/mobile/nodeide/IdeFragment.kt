@@ -508,9 +508,13 @@ class IdeFragment : Fragment() {
     }
 
     private fun renderTabs() {
-        tabs.removeAllViews()
-        for (file in opened) {
-            button(tabs, (if (file == currentFile) "● " else "") + file.name) { openFile(file) }
+        try {
+            tabs.removeAllViews()
+            for (file in opened) {
+                button(tabs, (if (file == currentFile) "● " else "") + file.name) { openFile(file) }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("IdeFragment", "Erro ao renderizar abas: ${e.message}")
         }
     }
 
@@ -613,8 +617,11 @@ class IdeFragment : Fragment() {
     }
 
     override fun onDestroyView() {
-        session?.close("Shell encerrado")
-        session = null
+        try {
+            session?.close("Shell encerrado")
+            session = null
+        } catch (_: Exception) {
+        }
         super.onDestroyView()
     }
 

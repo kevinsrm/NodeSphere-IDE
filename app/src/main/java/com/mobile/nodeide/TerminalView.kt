@@ -16,6 +16,7 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.text.style.UnderlineSpan
 import android.util.AttributeSet
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
@@ -231,31 +232,35 @@ class TerminalView @JvmOverloads constructor(
      * não destruir a seleção; o emulator continua acumulando a saída.
      */
     private fun render() {
-        if (selecting || textView.hasSelection()) {
-            needsRender = true
-            return
+        try {
+            if (selecting || textView.hasSelection()) {
+                needsRender = true
+                return
+            }
+            needsRender = false
+            val builder = SpannableStringBuilder()
+            val columns = emulator.columns
+            val scrollback = emulator.scrollbackSize
+
+            for (index in 0 until scrollback) {
+                emulator.scrollbackRow(index)?.let { appendRow(builder, it, columns) }
+                builder.append('\n')
+            }
+            for (index in 0 until emulator.rows) {
+                emulator.screenRow(index)?.let { appendRow(builder, it, columns) }
+                if (index < emulator.rows - 1) builder.append('\n')
+            }
+
+            cursorOffset = ((scrollback + emulator.cursorRow) * (columns + 1) + emulator.cursorColumn)
+                .coerceIn(0, builder.length)
+
+            textView.setText(builder, TextView.BufferType.SPANNABLE)
+            applyCursor()
+
+            if (autoScroll) post { fullScroll(FOCUS_DOWN) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Erro durante renderização do terminal: ${e.message}", e)
         }
-        needsRender = false
-        val builder = SpannableStringBuilder()
-        val columns = emulator.columns
-        val scrollback = emulator.scrollbackSize
-
-        for (index in 0 until scrollback) {
-            emulator.scrollbackRow(index)?.let { appendRow(builder, it, columns) }
-            builder.append('\n')
-        }
-        for (index in 0 until emulator.rows) {
-            emulator.screenRow(index)?.let { appendRow(builder, it, columns) }
-            if (index < emulator.rows - 1) builder.append('\n')
-        }
-
-        cursorOffset = ((scrollback + emulator.cursorRow) * (columns + 1) + emulator.cursorColumn)
-            .coerceIn(0, builder.length)
-
-        textView.setText(builder, TextView.BufferType.SPANNABLE)
-        applyCursor()
-
-        if (autoScroll) post { fullScroll(FOCUS_DOWN) }
     }
 
     private fun appendRow(builder: SpannableStringBuilder, row: TerminalRow, columns: Int) {
@@ -278,40 +283,50 @@ class TerminalView @JvmOverloads constructor(
                 builder.append(row.characterAt(next))
                 next++
             }
-            val paintedForeground: Int
-            val paintedBackground: Int
-            if (reverse) {
-                paintedForeground = if (background == 0) BACKGROUND else background
-                paintedBackground = if (foreground == 0) FOREGROUND else foreground
-            } else {
-                paintedForeground = if (foreground == 0) FOREGROUND else foreground
-                paintedBackground = background
+            val end = builder.length
+            if (end > start) {
+                val paintedForeground: Int
+                val paintedBackground: Int
+                if (reverse) {
+                    paintedForeground = if (background == 0) BACKGROUND else background
+                    paintedBackground = if (foreground == 0) FOREGROUND else foreground
+                } else {
+                    paintedForeground = if (foreground == 0) FOREGROUND else foreground
+                    paintedBackground = background
+                }
+                if (paintedForeground != FOREGROUND) {
+                    builder.setSpan(ForegroundColorSpan(paintedForeground), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                if (paintedBackground != 0) {
+                    builder.setSpan(BackgroundColorSpan(paintedBackground), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                if (bold) builder.setSpan(StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                if (underline) builder.setSpan(UnderlineSpan(), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            if (paintedForeground != FOREGROUND) {
-                builder.setSpan(ForegroundColorSpan(paintedForeground), start, next, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-            if (paintedBackground != 0) {
-                builder.setSpan(BackgroundColorSpan(paintedBackground), start, next, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-            if (bold) builder.setSpan(StyleSpan(Typeface.BOLD), start, next, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            if (underline) builder.setSpan(UnderlineSpan(), start, next, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             column = next
         }
     }
 
     /** Liga/desliga o cursor sem reconstruir o texto inteiro. */
     private fun applyCursor() {
-        val text = textView.text as? Spannable ?: return
-        for (span in cursorSpans) text.removeSpan(span)
-        cursorSpans.clear()
-        if (!cursorOn || !emulator.cursorVisible || selecting || textView.hasSelection()) return
-        if (cursorOffset < 0 || cursorOffset >= text.length) return
-        val background = BackgroundColorSpan(CURSOR)
-        val foreground = ForegroundColorSpan(BACKGROUND)
-        text.setSpan(background, cursorOffset, cursorOffset + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        text.setSpan(foreground, cursorOffset, cursorOffset + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        cursorSpans.add(background)
-        cursorSpans.add(foreground)
+        try {
+            val text = textView.text as? Spannable ?: return
+            for (span in cursorSpans) text.removeSpan(span)
+            cursorSpans.clear()
+            if (!cursorOn || !emulator.cursorVisible || selecting || textView.hasSelection()) return
+            if (cursorOffset < 0 || cursorOffset >= text.length) return
+            val background = BackgroundColorSpan(CURSOR)
+            val foreground = ForegroundColorSpan(BACKGROUND)
+            val end = (cursorOffset + 1).coerceAtMost(text.length)
+            if (end > cursorOffset) {
+                text.setSpan(background, cursorOffset, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                text.setSpan(foreground, cursorOffset, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                cursorSpans.add(background)
+                cursorSpans.add(foreground)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Erro ao aplicar cursor: ${e.message}")
+        }
     }
 
     // ---- teclado ------------------------------------------------------------
@@ -466,6 +481,7 @@ class TerminalView @JvmOverloads constructor(
     }
 
     private companion object {
+        const val TAG = "TerminalView"
         const val TEXT_SIZE_SP = 12.5f
         const val BLINK_MILLIS = 500L
 
