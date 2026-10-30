@@ -3,7 +3,9 @@ package com.mobile.nodeide
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
@@ -11,7 +13,9 @@ import android.text.Selection
 import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
+import android.text.TextPaint
 import android.text.style.BackgroundColorSpan
+import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.text.style.UnderlineSpan
@@ -20,6 +24,9 @@ import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewConfiguration
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -27,23 +34,22 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import java.util.regex.Pattern
+import kotlin.math.abs
 import kotlin.math.floor
 
 /**
- * Terminal com seleção e cópia nativas.
+ * Terminal com seleção e cópia nativas e detecção automática de links/localhost.
  *
  * A saída do [TerminalEmulator] (grade de caracteres + ANSI) é renderizada num
- * [TextView] monoespaçado dentro de um [ScrollView]. Isso dá, de graça:
+ * [TextView] monoespaçado dentro de um [ScrollView].
  *
- * - alinhamento em grade (cada linha tem exatamente `columns` caracteres, sem
- *   ligaduras/espaçamento proporcional que desalinhavam o `ls`);
- * - toque longo para selecionar texto e barra flutuante de copiar/selecionar
- *   tudo, igual a qualquer terminal real (`setTextIsSelectable(true)`);
- * - rolagem vertical do histórico com auto-scroll para o fim.
- *
- * O teclado do sistema continua digitando direto no terminal: o [TextView]
- * interno expõe uma [InputConnection] que repassa texto/teclas para [onInput],
- * sem caixa de texto separada.
+ * Recursos:
+ * - Alinhamento em grade monoespaçada;
+ * - Toque longo para seleção de texto e barra flutuante de ações;
+ * - Detecção automática e conversão de URLs, localhost, endereços IP e frases de portas
+ *   em links clicáveis com destaque visual;
+ * - Abertura instantânea no navegador padrão ao tocar em links de localhost/servidor web.
  */
 class TerminalView @JvmOverloads constructor(
     context: Context,
@@ -56,6 +62,9 @@ class TerminalView @JvmOverloads constructor(
 
     /** Avisa quando o número de colunas/linhas muda (o shell usa COLUMNS/LINES). */
     var onResized: ((Int, Int) -> Unit)? = null
+
+    /** Callback opcional chamado quando um link é clicado. */
+    var onUrlClick: ((String) -> Unit)? = null
 
     private val emulator = TerminalEmulator()
     private val textView = TerminalTextView(context)
@@ -185,6 +194,26 @@ class TerminalView @JvmOverloads constructor(
         Toast.makeText(context, "Texto copiado", Toast.LENGTH_SHORT).show()
     }
 
+    /** Abre um link/URL no navegador padrão do Android ou repassa ao callback onUrlClick. */
+    fun openLink(rawUrl: String) {
+        if (onUrlClick != null) {
+            onUrlClick?.invoke(rawUrl)
+            return
+        }
+        try {
+            val target = normalizeUrl(rawUrl)
+            val uri = Uri.parse(target)
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            Toast.makeText(context, "Abrindo $target", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Falha ao abrir link: $rawUrl (${e.message})", e)
+            Toast.makeText(context, "Não foi possível abrir o link: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun collapseSelection() {
         val text = textView.text
         if (text is Spannable) {
@@ -227,7 +256,7 @@ class TerminalView @JvmOverloads constructor(
     }
 
     /**
-     * Constrói o texto completo (histórico + tela) com spans de cor/estilo.
+     * Constrói o texto completo (histórico + tela) com spans de cor/estilo e links clicáveis.
      * Enquanto o usuário mantém uma seleção ativa, a reconstrução é adiada para
      * não destruir a seleção; o emulator continua acumulando a saída.
      */
@@ -250,6 +279,9 @@ class TerminalView @JvmOverloads constructor(
                 emulator.screenRow(index)?.let { appendRow(builder, it, columns) }
                 if (index < emulator.rows - 1) builder.append('\n')
             }
+
+            // Aplica detecção automática de links (localhost, URLs, portas)
+            applyLinks(builder)
 
             cursorOffset = ((scrollback + emulator.cursorRow) * (columns + 1) + emulator.cursorColumn)
                 .coerceIn(0, builder.length)
@@ -307,6 +339,24 @@ class TerminalView @JvmOverloads constructor(
         }
     }
 
+    /** Detecta padrões de URLs, localhost e portas e aplica spans clicáveis. */
+    private fun applyLinks(builder: SpannableStringBuilder) {
+        try {
+            val text = builder.toString()
+            val links = findTerminalLinks(text)
+            for (link in links) {
+                if (link.start in 0 until builder.length && link.end in 1..builder.length && link.start < link.end) {
+                    val span = TerminalLinkSpan(link.target) { url ->
+                        openLink(url)
+                    }
+                    builder.setSpan(span, link.start, link.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Erro ao aplicar spans de links: ${e.message}")
+        }
+    }
+
     /** Liga/desliga o cursor sem reconstruir o texto inteiro. */
     private fun applyCursor() {
         try {
@@ -329,7 +379,101 @@ class TerminalView @JvmOverloads constructor(
         }
     }
 
-    // ---- teclado ------------------------------------------------------------
+    // ---- links e padrões ----------------------------------------------------
+
+    private data class LinkMatch(val start: Int, val end: Int, val raw: String, val target: String)
+
+    private fun cleanTrailingPunctuation(text: String, start: Int, initialEnd: Int): Int {
+        var end = initialEnd
+        while (end > start && text[end - 1] in ".,!?;:'\")}]") {
+            end--
+        }
+        return end
+    }
+
+    private fun findTerminalLinks(text: String): List<LinkMatch> {
+        val results = ArrayList<LinkMatch>()
+
+        // 1. URLs completas (http / https)
+        val urlMatcher = URL_PATTERN.matcher(text)
+        while (urlMatcher.find()) {
+            val start = urlMatcher.start()
+            val end = cleanTrailingPunctuation(text, start, urlMatcher.end())
+            if (end > start) {
+                val raw = text.substring(start, end)
+                results.add(LinkMatch(start, end, raw, raw))
+            }
+        }
+
+        // 2. Host:porta (localhost:3000, 127.0.0.1:8080, 0.0.0.0:3000)
+        val hostMatcher = HOST_PORT_PATTERN.matcher(text)
+        while (hostMatcher.find()) {
+            val start = hostMatcher.start()
+            val end = cleanTrailingPunctuation(text, start, hostMatcher.end())
+            if (end > start && !overlaps(results, start, end)) {
+                val raw = text.substring(start, end)
+                results.add(LinkMatch(start, end, raw, "http://$raw"))
+            }
+        }
+
+        // 3. Frases de portas ("port 3000", "port: 3000", "port 8080")
+        val portMatcher = PORT_PATTERN.matcher(text)
+        while (portMatcher.find()) {
+            val start = portMatcher.start()
+            val end = cleanTrailingPunctuation(text, start, portMatcher.end())
+            val port = portMatcher.group(1)
+            if (end > start && port != null && !overlaps(results, start, end)) {
+                val raw = text.substring(start, end)
+                results.add(LinkMatch(start, end, raw, "http://localhost:$port"))
+            }
+        }
+
+        results.sortBy { it.start }
+        return results
+    }
+
+    private fun overlaps(matches: List<LinkMatch>, start: Int, end: Int): Boolean {
+        for (m in matches) {
+            if (start < m.end && end > m.start) return true
+        }
+        return false
+    }
+
+    private fun normalizeUrl(raw: String): String {
+        var url = raw.trim()
+        if (url.startsWith("http://0.0.0.0", ignoreCase = true)) {
+            url = "http://localhost" + url.substring(14)
+        } else if (url.startsWith("https://0.0.0.0", ignoreCase = true)) {
+            url = "https://localhost" + url.substring(15)
+        } else if (url.startsWith("0.0.0.0:", ignoreCase = true)) {
+            url = "http://localhost:" + url.substring(8)
+        } else if (url.startsWith("http://[::1]", ignoreCase = true)) {
+            url = "http://localhost" + url.substring(12)
+        } else if (url.startsWith("https://[::1]", ignoreCase = true)) {
+            url = "https://localhost" + url.substring(13)
+        } else if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
+            url = "http://$url"
+        }
+        return url
+    }
+
+    /** Span estilizado para links clicáveis no terminal. */
+    private class TerminalLinkSpan(
+        val url: String,
+        private val onClickListener: (String) -> Unit
+    ) : ClickableSpan() {
+        override fun onClick(widget: View) {
+            onClickListener(url)
+        }
+
+        override fun updateDrawState(ds: TextPaint) {
+            super.updateDrawState(ds)
+            ds.color = LINK_COLOR
+            ds.isUnderlineText = true
+        }
+    }
+
+    // ---- teclado e toque ----------------------------------------------------
 
     private fun handleInput(data: String) {
         if (data.isEmpty()) return
@@ -395,10 +539,51 @@ class TerminalView @JvmOverloads constructor(
     }
 
     /**
-     * TextView selecionável que também recebe o teclado do sistema e repassa
-     * tudo para a sessão do shell (sem editar o texto renderizado).
+     * TextView selecionável que recebe entrada do teclado e gerencia toques em links.
      */
     private inner class TerminalTextView(context: Context) : TextView(context) {
+
+        private var downX = 0f
+        private var downY = 0f
+        private var downTime = 0L
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.x
+                    downY = event.y
+                    downTime = System.currentTimeMillis()
+                }
+                MotionEvent.ACTION_UP -> {
+                    val upX = event.x
+                    val upY = event.y
+                    val deltaX = abs(upX - downX)
+                    val deltaY = abs(upY - downY)
+                    val elapsed = System.currentTimeMillis() - downTime
+                    val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+                    val isClick = deltaX < touchSlop && deltaY < touchSlop && elapsed < ViewConfiguration.getLongPressTimeout()
+
+                    if (isClick && !hasSelection()) {
+                        val x = upX.toInt() - totalPaddingLeft + scrollX
+                        val y = upY.toInt() - totalPaddingTop + scrollY
+                        val layout = layout
+                        if (layout != null) {
+                            val line = layout.getLineForVertical(y)
+                            val offset = layout.getOffsetForHorizontal(line, x.toFloat())
+                            val spanned = text as? Spanned
+                            if (spanned != null && offset in 0 until spanned.length) {
+                                val links = spanned.getSpans(offset, offset, TerminalLinkSpan::class.java)
+                                if (links.isNotEmpty()) {
+                                    links[0].onClick(this)
+                                    return true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return super.onTouchEvent(event)
+        }
 
         override fun onCheckIsTextEditor(): Boolean = true
 
@@ -489,5 +674,19 @@ class TerminalView @JvmOverloads constructor(
         val FOREGROUND = 0xffd7dceb.toInt()
         val CURSOR = 0xff8ac6ff.toInt()
         val SELECTION = 0x663d6fb5.toInt()
+        val LINK_COLOR = 0xff38bdf8.toInt() // Céu vibrante (#38bdf8)
+
+        val URL_PATTERN: Pattern = Pattern.compile(
+            "https?://(?:\\[[0-9a-fA-F:]+\\]|[^\\s\"'<>()\\[\\]])+",
+            Pattern.CASE_INSENSITIVE
+        )
+        val HOST_PORT_PATTERN: Pattern = Pattern.compile(
+            "\\b(?:localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|(?:\\d{1,3}\\.){3}\\d{1,3}):[0-9]{2,5}(?:/[^\\s\"'<>()\\[\\]]*)?",
+            Pattern.CASE_INSENSITIVE
+        )
+        val PORT_PATTERN: Pattern = Pattern.compile(
+            "\\b(?:port\\s*:?\\s*)([0-9]{2,5})\\b",
+            Pattern.CASE_INSENSITIVE
+        )
     }
 }
