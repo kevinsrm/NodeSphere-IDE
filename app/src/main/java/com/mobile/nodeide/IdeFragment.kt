@@ -160,14 +160,30 @@ class IdeFragment : Fragment() {
 
             // Teclas do terminal: mandam as mesmas sequências de um teclado real.
             val keys = root.findViewById<LinearLayout>(R.id.keys)
+            val ctrlBtn = button(keys, "Ctrl") {
+                terminal.toggleCtrl()
+            }
+            terminal.onCtrlStateChanged = { active ->
+                if (active) {
+                    ctrlBtn.text = "[Ctrl]"
+                    ctrlBtn.setTextColor(0xff38bdf8.toInt())
+                    ctrlBtn.setTypeface(null, android.graphics.Typeface.BOLD)
+                } else {
+                    ctrlBtn.text = "Ctrl"
+                    ctrlBtn.setTextColor(0xffddd9ed.toInt())
+                    ctrlBtn.setTypeface(null, android.graphics.Typeface.NORMAL)
+                }
+            }
+            button(keys, "ESC") { terminal.type(ESCAPE) }
+            button(keys, "Tab") { terminal.type("\t") }
+            button(keys, "^C") { terminal.type("\u0003") }
+            button(keys, "^D") { terminal.type("\u0004") }
+            button(keys, "^Z") { terminal.type("\u001a") }
             button(keys, "⇤") { terminal.type(ESCAPE + "[H") }
             button(keys, "←") { terminal.type(ESCAPE + "[D") }
             button(keys, "→") { terminal.type(ESCAPE + "[C") }
             button(keys, "↑") { terminal.type(ESCAPE + "[A") }
             button(keys, "↓") { terminal.type(ESCAPE + "[B") }
-            button(keys, "Tab") { terminal.type("\t") }
-            button(keys, "^C") { terminal.type("\u0003") }
-            button(keys, "^D") { terminal.type("\u0004") }
             button(keys, "⏎") { terminal.type("\r") }
             button(keys, "clear") { session?.clearScreen() }
             button(keys, "⧉ Copiar") { terminal.copySelectionOrAll() }
@@ -257,12 +273,13 @@ class IdeFragment : Fragment() {
     }
 
     private fun stopShell() {
-        val current = session ?: return
-        if (!current.running) {
-            terminal.feed("\r\n\u001b[90m[ o shell já está parado ]\u001b[0m\r\n")
+        val current = session
+        TerminalSession.killAllChildProcesses()
+        if (current == null || !current.running) {
+            terminal.feed("\r\n\u001b[90m[ processos e shell encerrados ]\u001b[0m\r\n")
             return
         }
-        current.close("Shell encerrado")
+        current.close("Shell e processos encerrados")
     }
 
     private fun interrupt() {
@@ -286,6 +303,7 @@ class IdeFragment : Fragment() {
     /**
      * Executa o projeto no terminal integrado: o shell já está na pasta do
      * projeto, então `node arquivo.js` roda exatamente onde os arquivos estão.
+     * Encerra instâncias anteriores em background para liberar portas (evitando EADDRINUSE).
      */
     private fun runProject() {
         if (!runtime.isNodeInstalled()) {
@@ -300,6 +318,9 @@ class IdeFragment : Fragment() {
         save()
         panel.visibility = View.VISIBLE
         val current = session
+        // Mata processos anteriores para liberar a porta e evitar EADDRINUSE
+        TerminalSession.killAllChildProcesses()
+        current?.killLingeringNodeProcesses()
         current?.ensureDirectory(project)
         submitCommand("node " + quote(entry.name))
         terminal.post { terminal.focusTerminal() }
@@ -399,7 +420,7 @@ class IdeFragment : Fragment() {
         view.visibility = if (view.visibility == View.VISIBLE) View.GONE else View.VISIBLE
     }
 
-    private fun button(row: LinearLayout, label: String, action: () -> Unit) {
+    private fun button(row: LinearLayout, label: String, action: () -> Unit): TextView {
         val view = TextView(main).apply {
             text = label
             setTextColor(0xffddd9ed.toInt())
@@ -415,6 +436,7 @@ class IdeFragment : Fragment() {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         )
+        return view
     }
 
     private fun refreshTree() {
