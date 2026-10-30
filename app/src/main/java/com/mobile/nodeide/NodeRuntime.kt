@@ -188,7 +188,7 @@ class NodeRuntime(context: Context) {
             try {
                 Thread.sleep(timeoutMillis)
                 started?.destroyForcibly()
-            } catch (_: Exception) {
+            } catch (ignored: Exception) {
             }
         }
         return try {
@@ -838,7 +838,7 @@ class NodeRuntime(context: Context) {
         return try {
             FileInputStream(file).use { it.read(buffer) }
             buffer
-        } catch (_: Exception) {
+        } catch (ignored: Exception) {
             ByteArray(0)
         }
     }
@@ -875,7 +875,7 @@ class NodeRuntime(context: Context) {
 
     private fun isSymbolicLink(file: File): Boolean = try {
         java.nio.file.Files.isSymbolicLink(file.toPath())
-    } catch (_: Exception) {
+    } catch (ignored: Exception) {
         false
     }
 

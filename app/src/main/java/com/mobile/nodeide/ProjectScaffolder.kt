@@ -25,7 +25,7 @@ internal object ProjectScaffolder {
             throw IOException("Não foi possível criar a pasta de projetos")
         }
 
-        val root = try { projectsDirectory.canonicalFile } catch (_: Exception) { projectsDirectory }
+        val root = try { projectsDirectory.canonicalFile } catch (ignored: Exception) { projectsDirectory }
         if (!root.exists() && !root.mkdirs()) {
             throw IOException("Não foi possível preparar o diretório raiz de projetos")
         }

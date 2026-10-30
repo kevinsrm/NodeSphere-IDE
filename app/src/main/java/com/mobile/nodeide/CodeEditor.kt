@@ -94,7 +94,7 @@ class CodeEditor @JvmOverloads constructor(
         try {
             popup?.dismiss()
             popup = null
-        } catch (_: Exception) {
+        } catch (ignored: Exception) {
         }
     }
 

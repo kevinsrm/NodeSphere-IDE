@@ -76,7 +76,7 @@ class IdeFragment : Fragment() {
             if (!directory.exists()) {
                 directory.mkdirs()
             }
-            project = try { directory.canonicalFile } catch (_: Exception) { directory }
+            project = try { directory.canonicalFile } catch (ignored: Exception) { directory }
             if (!project.exists()) {
                 project.mkdirs()
             }
@@ -343,7 +343,7 @@ class IdeFragment : Fragment() {
         val mainField = try {
             val manifest = ProjectConfigHelper.ensurePackageJson(project)
             manifest.optString("main", "").trim()
-        } catch (_: Exception) {
+        } catch (ignored: Exception) {
             ""
         }
         if (mainField.isNotEmpty()) {
@@ -391,7 +391,7 @@ class IdeFragment : Fragment() {
                 ?.filter { it.extension.lowercase(Locale.ROOT) in TEXT_EXTENSIONS }
                 ?.sortedBy { it.name.lowercase(Locale.ROOT) }
                 ?.firstOrNull()
-    } catch (_: Exception) {
+    } catch (ignored: Exception) {
         null
     }
 
@@ -425,7 +425,7 @@ class IdeFragment : Fragment() {
             if (!project.exists()) {
                 project.mkdirs()
             }
-            val canonical = try { project.canonicalFile } catch (_: Exception) { project }
+            val canonical = try { project.canonicalFile } catch (ignored: Exception) { project }
             if (!canonical.exists()) {
                 canonical.mkdirs()
             }
@@ -620,7 +620,7 @@ class IdeFragment : Fragment() {
         try {
             session?.close("Shell encerrado")
             session = null
-        } catch (_: Exception) {
+        } catch (ignored: Exception) {
         }
         super.onDestroyView()
     }

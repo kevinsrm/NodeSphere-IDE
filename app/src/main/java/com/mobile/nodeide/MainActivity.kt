@@ -168,7 +168,7 @@ class MainActivity : AppCompatActivity() {
             if (!directory.exists()) {
                 directory.mkdirs()
             }
-            val canonical = try { directory.canonicalFile } catch (_: Exception) { directory }
+            val canonical = try { directory.canonicalFile } catch (ignored: Exception) { directory }
             if (!canonical.exists()) {
                 canonical.mkdirs()
             }
@@ -191,7 +191,7 @@ class MainActivity : AppCompatActivity() {
         if (!workspace.exists() && !workspace.mkdirs()) {
             throw IOException("Não foi possível preparar o workspace do terminal")
         }
-        return try { workspace.canonicalFile } catch (_: Exception) { workspace }
+        return try { workspace.canonicalFile } catch (ignored: Exception) { workspace }
     }
 
     /** Diretório privado onde os projetos ficam armazenados. */
@@ -200,7 +200,7 @@ class MainActivity : AppCompatActivity() {
         if (!directory.exists() && !directory.mkdirs()) {
             throw IOException("Não foi possível criar a pasta de projetos")
         }
-        return try { directory.canonicalFile } catch (_: Exception) { directory }
+        return try { directory.canonicalFile } catch (ignored: Exception) { directory }
     }
 
     fun message(text: String) {
