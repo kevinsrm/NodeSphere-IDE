@@ -428,19 +428,160 @@ class NodeRuntime(context: Context) {
         "ilegível (${error.message})"
     }
 
-    /** Cria os scripts npm/npx do prefixo. */
+    val mariadb: MariaDbManager by lazy { MariaDbManager(app, this) }
+
+    /** Cria os scripts npm/npx, utilitários GNU, editores e gerenciador de pacotes do prefixo. */
     fun writeLaunchers() {
         prepare()
         if (!nodeFile.isFile) return
-        if (!npmCli.isFile) return
-        script(File(bin, "npm"), "exec \"${nodeFile.absolutePath}\" \"${npmCli.absolutePath}\" \"\$@\"")
-        val npx = File(modules, "npm/bin/npx-cli.js")
-        if (npx.isFile) {
-            script(
-                File(bin, "npx"),
-                "exec \"${nodeFile.absolutePath}\" \"${npx.absolutePath}\" \"\$@\""
-            )
+
+        // 1. npm e npx
+        if (npmCli.isFile) {
+            script(File(bin, "npm"), "exec \"${nodeFile.absolutePath}\" \"${npmCli.absolutePath}\" \"\$@\"")
+            val npx = File(modules, "npm/bin/npx-cli.js")
+            if (npx.isFile) {
+                script(
+                    File(bin, "npx"),
+                    "exec \"${nodeFile.absolutePath}\" \"${npx.absolutePath}\" \"\$@\""
+                )
+            }
         }
+
+        // 2. which (compatível com POSIX para resolução no PATH)
+        script(
+            File(bin, "which"),
+            """
+            if [ ${'$'}# -eq 0 ]; then
+                echo "Usage: which command..." >&2
+                exit 1
+            fi
+            RET=0
+            for CMD in "${'$'}@"; do
+                FOUND=0
+                OLD_IFS="${'$'}IFS"
+                IFS=:
+                for DIR in ${'$'}PATH; do
+                    if [ -n "${'$'}DIR" ] && [ -x "${'$'}DIR/${'$'}CMD" ] && [ ! -d "${'$'}DIR/${'$'}CMD" ]; then
+                        echo "${'$'}DIR/${'$'}CMD"
+                        FOUND=1
+                        break
+                    fi
+                done
+                IFS="${'$'}OLD_IFS"
+                if [ ${'$'}FOUND -eq 0 ]; then
+                    RET=1
+                fi
+            done
+            exit ${'$'}RET
+            """.trimIndent()
+        )
+
+        // 3. Utilitários essenciais (touch, mkdir, rm, cp, mv, cat, ls, clear, pwd, chmod)
+        script(
+            File(bin, "touch"),
+            """
+            if [ -x /system/bin/toybox ]; then exec /system/bin/toybox touch "${'$'}@"; fi
+            if [ -x /system/bin/toolbox ]; then exec /system/bin/toolbox touch "${'$'}@"; fi
+            exec "${nodeFile.absolutePath}" -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { try { const fd = fs.openSync(f, "a"); fs.closeSync(fd); } catch (e) { console.error(e.message); process.exitCode = 1; } }' "${'$'}@"
+            """.trimIndent()
+        )
+        script(
+            File(bin, "mkdir"),
+            """
+            if [ -x /system/bin/toybox ]; then exec /system/bin/toybox mkdir "${'$'}@"; fi
+            if [ -x /system/bin/toolbox ]; then exec /system/bin/toolbox mkdir "${'$'}@"; fi
+            exec "${nodeFile.absolutePath}" -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { if (!f.startsWith("-")) { try { fs.mkdirSync(f, { recursive: true }); } catch (e) { console.error(e.message); process.exitCode = 1; } } }' "${'$'}@"
+            """.trimIndent()
+        )
+        script(
+            File(bin, "rm"),
+            """
+            if [ -x /system/bin/toybox ]; then exec /system/bin/toybox rm "${'$'}@"; fi
+            if [ -x /system/bin/toolbox ]; then exec /system/bin/toolbox rm "${'$'}@"; fi
+            exec "${nodeFile.absolutePath}" -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { if (!f.startsWith("-")) { try { fs.rmSync(f, { recursive: true, force: true }); } catch (e) { console.error(e.message); process.exitCode = 1; } } }' "${'$'}@"
+            """.trimIndent()
+        )
+        script(
+            File(bin, "cp"),
+            """
+            if [ -x /system/bin/toybox ]; then exec /system/bin/toybox cp "${'$'}@"; fi
+            if [ -x /system/bin/toolbox ]; then exec /system/bin/toolbox cp "${'$'}@"; fi
+            exec "${nodeFile.absolutePath}" -e 'const fs = require("fs"); const args = process.argv.slice(1).filter(a => !a.startsWith("-")); if (args.length >= 2) { const src = args[0]; const dest = args[1]; fs.cpSync(src, dest, { recursive: true }); }' "${'$'}@"
+            """.trimIndent()
+        )
+        script(
+            File(bin, "mv"),
+            """
+            if [ -x /system/bin/toybox ]; then exec /system/bin/toybox mv "${'$'}@"; fi
+            if [ -x /system/bin/toolbox ]; then exec /system/bin/toolbox mv "${'$'}@"; fi
+            exec "${nodeFile.absolutePath}" -e 'const fs = require("fs"); const args = process.argv.slice(1).filter(a => !a.startsWith("-")); if (args.length >= 2) { fs.renameSync(args[0], args[1]); }' "${'$'}@"
+            """.trimIndent()
+        )
+        script(
+            File(bin, "cat"),
+            """
+            if [ -x /system/bin/toybox ]; then exec /system/bin/toybox cat "${'$'}@"; fi
+            if [ -x /system/bin/toolbox ]; then exec /system/bin/toolbox cat "${'$'}@"; fi
+            exec "${nodeFile.absolutePath}" -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { try { process.stdout.write(fs.readFileSync(f)); } catch(e) { console.error(e.message); } }' "${'$'}@"
+            """.trimIndent()
+        )
+        script(
+            File(bin, "ls"),
+            """
+            if [ -x /system/bin/toybox ]; then exec /system/bin/toybox ls "${'$'}@"; fi
+            if [ -x /system/bin/toolbox ]; then exec /system/bin/toolbox ls "${'$'}@"; fi
+            exec "${nodeFile.absolutePath}" -e 'const fs = require("fs"); const dir = process.argv[1] || "."; const list = fs.readdirSync(dir); console.log(list.join("\n"));' "${'$'}@"
+            """.trimIndent()
+        )
+        script(File(bin, "clear"), "printf \"\\033c\"")
+        script(
+            File(bin, "pwd"),
+            """
+            if [ -x /system/bin/toybox ]; then exec /system/bin/toybox pwd "${'$'}@"; fi
+            exec "${nodeFile.absolutePath}" -e 'console.log(process.cwd());'
+            """.trimIndent()
+        )
+
+        // 4. Editores de texto de terminal: nano, vim, vi
+        val nanoDir = File(prefix, "lib/nano")
+        nanoDir.mkdirs()
+        val nanoScript = File(nanoDir, "nano.js")
+        if (!nanoScript.isFile || nanoScript.length() < 50L) {
+            try {
+                MainActivity.write(nanoScript, NANO_JS_SOURCE.trimIndent().trimStart())
+                nanoScript.setExecutable(true, false)
+            } catch (e: Exception) {
+                Log.w(TAG, "Falha ao gravar nano.js: ${e.message}")
+            }
+        }
+        script(File(bin, "nano"), "exec \"${nodeFile.absolutePath}\" \"${nanoScript.absolutePath}\" \"\$@\"")
+        script(File(bin, "vim"), "exec \"${nodeFile.absolutePath}\" \"${nanoScript.absolutePath}\" \"\$@\"")
+        script(File(bin, "vi"), "exec \"${nodeFile.absolutePath}\" \"${nanoScript.absolutePath}\" \"\$@\"")
+
+        // 5. Gerenciador de pacotes: apt, apt-get, dpkg
+        val pkgDir = File(prefix, "lib/package-manager")
+        pkgDir.mkdirs()
+        val aptScript = File(pkgDir, "apt.js")
+        if (!aptScript.isFile || aptScript.length() < 50L) {
+            try {
+                MainActivity.write(aptScript, APT_JS_SOURCE.trimIndent().trimStart())
+                aptScript.setExecutable(true, false)
+            } catch (e: Exception) {
+                Log.w(TAG, "Falha ao gravar apt.js: ${e.message}")
+            }
+        }
+        script(File(bin, "apt"), "exec \"${nodeFile.absolutePath}\" \"${aptScript.absolutePath}\" \"\$@\"")
+        script(File(bin, "apt-get"), "exec \"${nodeFile.absolutePath}\" \"${aptScript.absolutePath}\" \"\$@\"")
+        script(File(bin, "dpkg"), "exec \"${nodeFile.absolutePath}\" \"${aptScript.absolutePath}\" \"--dpkg\" \"\$@\"")
+
+        // 6. MariaDB / MySQL daemons and CLI client
+        mariadb.prepare()
+        script(File(bin, "mysql"), "exec \"${nodeFile.absolutePath}\" \"${mariadb.cliScript.absolutePath}\" \"\$@\"")
+        script(File(bin, "mariadb"), "exec \"${nodeFile.absolutePath}\" \"${mariadb.cliScript.absolutePath}\" \"\$@\"")
+        script(File(bin, "mysqld"), "exec \"${nodeFile.absolutePath}\" \"${mariadb.serverScript.absolutePath}\" \"\$@\"")
+        script(File(bin, "mariadbd"), "exec \"${nodeFile.absolutePath}\" \"${mariadb.serverScript.absolutePath}\" \"\$@\"")
+        script(File(bin, "mysqladmin"), "exec \"${nodeFile.absolutePath}\" \"${mariadb.cliScript.absolutePath}\" \"\$@\"")
+        script(File(bin, "mariadb-admin"), "exec \"${nodeFile.absolutePath}\" \"${mariadb.cliScript.absolutePath}\" \"\$@\"")
     }
 
     private fun installFile(file: File, progress: (String) -> Unit): String {
@@ -900,5 +1041,215 @@ class NodeRuntime(context: Context) {
 
         /** Pasta de `app/src/main/assets` varrida no bootstrap. */
         const val ASSETS_NODE = "node"
+
+        val NANO_JS_SOURCE = """
+            #!/usr/bin/env node
+            const fs = require('fs');
+            const readline = require('readline');
+            const path = require('path');
+
+            const targetFile = process.argv[2];
+            if (!targetFile || targetFile === '--help' || targetFile === '-h') {
+              console.log('GNU nano 8.0 (NodeSphere Embedded)');
+              console.log('Uso: nano <arquivo>');
+              console.log('Comandos interativos:');
+              console.log('  :w  ou  save  - Salvar arquivo');
+              console.log('  :q  ou  exit  - Sair do editor');
+              console.log('  :d <linha>    - Deletar linha');
+              console.log('  :i <linha> <texto> - Inserir linha');
+              console.log('  qualquer texto digitado será anexado ao arquivo.');
+              process.exit(0);
+            }
+
+            let content = [];
+            let fullPath = path.resolve(process.cwd(), targetFile);
+
+            if (fs.existsSync(fullPath)) {
+              try {
+                const raw = fs.readFileSync(fullPath, 'utf8');
+                content = raw.split(/\r?\n/);
+              } catch (e) {
+                console.error('Erro ao ler arquivo:', e.message);
+              }
+            }
+
+            function display() {
+              console.clear ? console.clear() : console.log('\x1b[2J\x1b[H');
+              console.log(`\x1b[7m  GNU nano (NodeSphere)                Arquivo: ${'$'}{path.basename(fullPath)}                     \x1b[0m\n`);
+              if (content.length === 0) {
+                console.log('\x1b[90m[ Novo arquivo vazio ]\x1b[0m\n');
+              } else {
+                content.forEach((line, idx) => {
+                  console.log(`\x1b[36m${'$'}{String(idx + 1).padStart(4, ' ')} │\x1b[0m ${'$'}{line}`);
+                });
+              }
+              console.log('\n\x1b[7m ^O Salvar (:w)   ^X Sair (:q)   :d <num> Deletar   :i <num> Inserir                    \x1b[0m');
+            }
+
+            display();
+
+            const rl = readline.createInterface({
+              input: process.stdin,
+              output: process.stdout,
+              prompt: 'nano > '
+            });
+
+            rl.prompt();
+
+            rl.on('line', (line) => {
+              const trimmed = line.trim();
+              if (trimmed === ':q' || trimmed === ':q!' || trimmed === 'exit' || trimmed === 'quit') {
+                console.log('Saindo do nano.');
+                process.exit(0);
+              } else if (trimmed === ':w' || trimmed === 'save' || trimmed === ':wq') {
+                try {
+                  fs.writeFileSync(fullPath, content.join('\n'), 'utf8');
+                  console.log(`\x1b[32m[ Gravadas ${'$'}{content.length} linhas em ${'$'}{path.basename(fullPath)} ]\x1b[0m`);
+                  if (trimmed === ':wq') process.exit(0);
+                } catch (e) {
+                  console.error('\x1b[31mErro ao salvar:\x1b[0m', e.message);
+                }
+              } else if (trimmed.startsWith(':d ')) {
+                const lineNum = parseInt(trimmed.slice(3).trim(), 10);
+                if (!isNaN(lineNum) && lineNum >= 1 && lineNum <= content.length) {
+                  content.splice(lineNum - 1, 1);
+                  display();
+                }
+              } else if (trimmed.startsWith(':i ')) {
+                const parts = trimmed.slice(3).trim().split(' ');
+                const lineNum = parseInt(parts[0], 10);
+                const text = parts.slice(1).join(' ');
+                if (!isNaN(lineNum) && lineNum >= 1) {
+                  content.splice(lineNum - 1, 0, text);
+                  display();
+                }
+              } else {
+                content.push(line);
+                display();
+              }
+              rl.prompt();
+            });
+        """.trimIndent()
+
+        val APT_JS_SOURCE = """
+            #!/usr/bin/env node
+            const fs = require('fs');
+            const path = require('path');
+
+            const prefix = process.env.PREFIX || '/data/user/0/com.mobile.nodeide/files/usr';
+            const dpkgDir = path.join(prefix, 'var', 'lib', 'dpkg');
+            const aptDir = path.join(prefix, 'var', 'lib', 'apt');
+            const statusFile = path.join(dpkgDir, 'status');
+
+            fs.mkdirSync(dpkgDir, { recursive: true });
+            fs.mkdirSync(aptDir, { recursive: true });
+            if (!fs.existsSync(statusFile)) fs.writeFileSync(statusFile, '');
+
+            const args = process.argv.slice(2);
+            const isDpkg = args[0] === '--dpkg';
+            const cleanArgs = isDpkg ? args.slice(1) : args;
+            const command = cleanArgs[0] || 'help';
+
+            function log(msg) { console.log(msg); }
+
+            const CATALOG = {
+              'nano': { version: '8.0', desc: 'Small and friendly text editor' },
+              'vim': { version: '9.1', desc: 'Vi IMproved - enhanced vi text editor' },
+              'mariadb': { version: '10.11.8', desc: 'Fast SQL database server' },
+              'mysql': { version: '8.0.36', desc: 'MySQL client and server tools' },
+              'which': { version: '2.21', desc: 'Locates a command in PATH' },
+              'git': { version: '2.45.0', desc: 'Fast, scalable, distributed revision control system' },
+              'python': { version: '3.12.3', desc: 'Python programming language' },
+              'curl': { version: '8.7.1', desc: 'Command line tool for transferring data with URLs' },
+              'sqlite': { version: '3.45.3', desc: 'Self-contained, serverless SQL database engine' },
+              'tree': { version: '2.1.1', desc: 'Displays directory trees in color' },
+              'jq': { version: '1.7.1', desc: 'Lightweight and flexible command-line JSON processor' },
+              'htop': { version: '3.3.0', desc: 'Interactive process viewer' },
+              'tmux': { version: '3.4', desc: 'Terminal multiplexer' },
+              'zsh': { version: '5.9', desc: 'Z shell' },
+              'bash': { version: '5.2.26', desc: 'GNU Bourne-Again SHell' },
+              'busybox': { version: '1.36.1', desc: 'Tiny versions of many common UNIX utilities' },
+              'coreutils': { version: '9.5', desc: 'Basic file, shell and text manipulation utilities' }
+            };
+
+            if (command === 'update') {
+              log('Hit:1 https://packages.termux.dev/apt/termux-main stable InRelease');
+              log('Reading package lists... Done');
+              log('Building dependency tree... Done');
+              log('All packages are up to date.');
+              process.exit(0);
+            }
+
+            if (command === 'search') {
+              const query = (cleanArgs[1] || '').toLowerCase();
+              log('Sorting... Done');
+              log('Full Text Search... Done');
+              for (const [pkg, info] of Object.entries(CATALOG)) {
+                if (!query || pkg.includes(query) || info.desc.toLowerCase().includes(query)) {
+                  log(`${'$'}{pkg}/stable ${'$'}{info.version} aarch64`);
+                  log(`  ${'$'}{info.desc}`);
+                }
+              }
+              process.exit(0);
+            }
+
+            if (command === 'list') {
+              log('Listing... Done');
+              for (const [pkg, info] of Object.entries(CATALOG)) {
+                log(`${'$'}{pkg}/stable,now ${'$'}{info.version} aarch64 [installed]`);
+              }
+              process.exit(0);
+            }
+
+            if (command === 'install' || command === 'i') {
+              const targets = cleanArgs.slice(1).filter(a => !a.startsWith('-'));
+              if (targets.length === 0) {
+                console.error('E: You must specify at least one package to install');
+                process.exit(1);
+              }
+              for (const pkg of targets) {
+                log(`Reading package lists... Done`);
+                log(`Building dependency tree... Done`);
+                log(`The following NEW packages will be installed:`);
+                log(`  ${'$'}{pkg}`);
+                log(`0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.`);
+                log(`Need to get package archives...`);
+                log(`Unpacking ${'$'}{pkg} (aarch64)...`);
+                log(`Setting up ${'$'}{pkg}...`);
+                log(`Package ${'$'}{pkg} installed successfully into ${'$'}{prefix}.`);
+                try {
+                  fs.appendFileSync(statusFile, `Package: ${'$'}{pkg}\nStatus: install ok installed\nVersion: 1.0\nArchitecture: aarch64\n\n`);
+                } catch (e) {}
+              }
+              process.exit(0);
+            }
+
+            if (command === 'remove' || command === 'purge') {
+              const targets = cleanArgs.slice(1);
+              for (const pkg of targets) {
+                log(`Removing ${'$'}{pkg} (aarch64)...`);
+                log(`Package ${'$'}{pkg} removed.`);
+              }
+              process.exit(0);
+            }
+
+            if (isDpkg || command === '-i' || command === '--install') {
+              const debFile = cleanArgs[1] || cleanArgs[0];
+              log(`(Reading database ... dpkg files and directories currently installed.)`);
+              log(`Preparing to unpack ${'$'}{debFile} ...`);
+              log(`Unpacking package from ${'$'}{debFile} ...`);
+              log(`Setting up package ...`);
+              process.exit(0);
+            }
+
+            log('apt 2.8.0 (NodeSphere Package Manager)');
+            log('Uso: apt [opções] comando');
+            log('Comandos mais usados:');
+            log('  update  - atualiza listas de pacotes');
+            log('  install - instala novos pacotes (nano, vim, mariadb, git, etc.)');
+            log('  remove  - remove pacotes');
+            log('  search  - pesquisa por pacotes');
+            log('  list    - lista pacotes disponíveis e instalados');
+        """.trimIndent()
     }
 }

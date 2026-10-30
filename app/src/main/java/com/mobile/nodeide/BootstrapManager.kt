@@ -34,6 +34,9 @@ object BootstrapManager {
             try {
                 runtime.prepare()
                 val success = installNodeIfNeeded(context, runtime)
+                runtime.writeLaunchers()
+                runtime.mariadb.prepare()
+                runtime.mariadb.initDatabase(force = false)
                 if (runtime.isNodeInstalled() && !runtime.isNpmInstalled()) {
                     try {
                         runtime.installNpm()

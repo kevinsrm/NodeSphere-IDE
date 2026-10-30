@@ -238,9 +238,18 @@ class IdeFragment : Fragment() {
             }
 
             terminalSession.start()
-            if (arguments?.getBoolean(ARG_OPEN_TERMINAL, false) == true) {
+            val openTerminal = arguments?.getBoolean(ARG_OPEN_TERMINAL, false) == true
+            val initialCommand = arguments?.getString(ARG_INITIAL_COMMAND)
+            if (openTerminal || !initialCommand.isNullOrBlank()) {
                 panel.visibility = View.VISIBLE
-                terminal.post { terminal.focusTerminal() }
+                if (!initialCommand.isNullOrBlank()) {
+                    terminal.postDelayed({
+                        submitCommand(initialCommand)
+                        terminal.focusTerminal()
+                    }, 400L)
+                } else {
+                    terminal.post { terminal.focusTerminal() }
+                }
             }
 
             requireActivity().onBackPressedDispatcher.addCallback(
@@ -654,6 +663,7 @@ class IdeFragment : Fragment() {
 
     companion object {
         private const val ARG_OPEN_TERMINAL = "open_terminal"
+        private const val ARG_INITIAL_COMMAND = "initial_command"
         private const val PREF_AUTOCOMPLETE = "autocomplete"
         private const val PREF_LINE_NUMBERS = "line_numbers"
 
@@ -664,8 +674,13 @@ class IdeFragment : Fragment() {
             "js", "mjs", "cjs", "ts", "tsx", "jsx", "html", "css", "json", "md", "txt", "xml", "yml", "yaml"
         )
 
-        fun newInstance(openTerminal: Boolean = false) = IdeFragment().apply {
-            arguments = Bundle().apply { putBoolean(ARG_OPEN_TERMINAL, openTerminal) }
+        fun newInstance(openTerminal: Boolean = false, initialCommand: String? = null) = IdeFragment().apply {
+            arguments = Bundle().apply {
+                putBoolean(ARG_OPEN_TERMINAL, openTerminal)
+                if (!initialCommand.isNullOrBlank()) {
+                    putString(ARG_INITIAL_COMMAND, initialCommand)
+                }
+            }
         }
     }
 }
