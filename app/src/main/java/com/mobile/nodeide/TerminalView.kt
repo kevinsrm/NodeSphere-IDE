@@ -132,16 +132,20 @@ class TerminalView @JvmOverloads constructor(
 
         scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val factor = detector.scaleFactor
-                if (factor.isNaN() || factor.isInfinite()) return false
-                val newSize = (currentTextSizeSp * factor).coerceIn(MIN_TEXT_SIZE_SP, MAX_TEXT_SIZE_SP)
-                if (abs(newSize - currentTextSizeSp) >= 0.25f) {
-                    currentTextSizeSp = newSize
-                    textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, currentTextSizeSp)
-                    measureCells(width, height)
-                    scheduleRender()
+                try {
+                    val factor = detector.scaleFactor
+                    if (factor.isNaN() || factor.isInfinite() || factor <= 0f) return false
+                    val newSize = (currentTextSizeSp * factor).coerceIn(MIN_TEXT_SIZE_SP, MAX_TEXT_SIZE_SP)
+                    if (abs(newSize - currentTextSizeSp) >= 0.25f) {
+                        currentTextSizeSp = newSize
+                        textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, currentTextSizeSp)
+                        measureCells(width, height)
+                        scheduleRender()
+                    }
+                    return true
+                } catch (ignored: Exception) {
+                    return false
                 }
-                return true
             }
         })
 
@@ -549,16 +553,33 @@ class TerminalView @JvmOverloads constructor(
 
     // ---- teclado e toque ----------------------------------------------------
 
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        try {
+            scaleDetector?.onTouchEvent(ev)
+            return super.dispatchTouchEvent(ev)
+        } catch (ignored: Exception) {
+            return true
+        }
+    }
+
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        scaleDetector?.onTouchEvent(ev)
-        if (scaleDetector?.isInProgress == true) return true
-        return super.onInterceptTouchEvent(ev)
+        try {
+            scaleDetector?.onTouchEvent(ev)
+            if (scaleDetector?.isInProgress == true) return true
+            return super.onInterceptTouchEvent(ev)
+        } catch (ignored: Exception) {
+            return false
+        }
     }
 
     override fun onTouchEvent(ev: MotionEvent): Boolean {
-        scaleDetector?.onTouchEvent(ev)
-        if (scaleDetector?.isInProgress == true) return true
-        return super.onTouchEvent(ev)
+        try {
+            scaleDetector?.onTouchEvent(ev)
+            if (scaleDetector?.isInProgress == true) return true
+            return super.onTouchEvent(ev)
+        } catch (ignored: Exception) {
+            return true
+        }
     }
 
     private fun handleInput(data: String) {
@@ -639,44 +660,56 @@ class TerminalView @JvmOverloads constructor(
         private var downTime = 0L
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
-            scaleDetector?.onTouchEvent(event)
-            if (scaleDetector?.isInProgress == true) return true
-
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = event.x
-                    downY = event.y
-                    downTime = System.currentTimeMillis()
+            try {
+                if (scaleDetector?.isInProgress == true) {
+                    return true
                 }
-                MotionEvent.ACTION_UP -> {
-                    val upX = event.x
-                    val upY = event.y
-                    val deltaX = abs(upX - downX)
-                    val deltaY = abs(upY - downY)
-                    val elapsed = System.currentTimeMillis() - downTime
-                    val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
-                    val isClick = deltaX < touchSlop && deltaY < touchSlop && elapsed < ViewConfiguration.getLongPressTimeout()
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = event.x
+                        downY = event.y
+                        downTime = System.currentTimeMillis()
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val upX = event.x
+                        val upY = event.y
+                        val deltaX = abs(upX - downX)
+                        val deltaY = abs(upY - downY)
+                        val elapsed = System.currentTimeMillis() - downTime
+                        val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+                        val isClick = deltaX < touchSlop && deltaY < touchSlop && elapsed < ViewConfiguration.getLongPressTimeout()
 
-                    if (isClick && !hasSelection()) {
-                        val x = upX.toInt() - totalPaddingLeft + scrollX
-                        val y = upY.toInt() - totalPaddingTop + scrollY
-                        val layout = layout
-                        if (layout != null) {
-                            val line = layout.getLineForVertical(y)
-                            val offset = layout.getOffsetForHorizontal(line, x.toFloat())
-                            val spanned = text as? Spanned
-                            if (spanned != null && offset in 0 until spanned.length) {
-                                val links = spanned.getSpans(offset, offset, TerminalLinkSpan::class.java)
-                                if (links.isNotEmpty()) {
-                                    links[0].onClick(this)
-                                    return true
+                        if (isClick && !hasSelection()) {
+                            val x = upX.toInt() - totalPaddingLeft + scrollX
+                            val y = upY.toInt() - totalPaddingTop + scrollY
+                            val currentLayout = layout
+                            if (currentLayout != null && y >= 0 && y < currentLayout.height) {
+                                val line = currentLayout.getLineForVertical(y)
+                                val lineLeft = currentLayout.getLineLeft(line)
+                                val lineRight = currentLayout.getLineRight(line)
+                                if (x >= lineLeft && x <= lineRight) {
+                                    val offset = currentLayout.getOffsetForHorizontal(line, x.toFloat())
+                                    val spanned = text as? Spanned
+                                    if (spanned != null && offset in 0 until spanned.length) {
+                                        val links = spanned.getSpans(offset, offset, TerminalLinkSpan::class.java)
+                                        for (span in links) {
+                                            val spanStart = spanned.getSpanStart(span)
+                                            val spanEnd = spanned.getSpanEnd(span)
+                                            if (offset in spanStart..spanEnd) {
+                                                span.onClick(this)
+                                                return true
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                return super.onTouchEvent(event)
+            } catch (ignored: Exception) {
+                return true
             }
-            return super.onTouchEvent(event)
         }
 
         override fun onCheckIsTextEditor(): Boolean = true
@@ -778,11 +811,11 @@ class TerminalView @JvmOverloads constructor(
             Pattern.CASE_INSENSITIVE
         )
         val HOST_PORT_PATTERN: Pattern = Pattern.compile(
-            "\\b(?:localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|(?:\\d{1,3}\\.){3}\\d{1,3}):[0-9]{2,5}(?:/[^\\s\"'<>()\\[\\]]*)?",
+            "\\b(?:localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]|(?:\\d{1,3}\\.){3}\\d{1,3}):[0-9]{2,5}(?:/[^\\s\"'<>()\\[\\]]*)?",
             Pattern.CASE_INSENSITIVE
         )
         val PORT_PATTERN: Pattern = Pattern.compile(
-            "\\b(?:port\\s*:?\\s*)([0-9]{2,5})\\b",
+            "\\b(?:port|porta)\\s*:?\\s*([0-9]{2,5})\\b",
             Pattern.CASE_INSENSITIVE
         )
     }

@@ -162,8 +162,8 @@ class MainActivity : AppCompatActivity() {
         else -> ProjectsFragment()
     }
 
-    /** Abre o projeto no editor e, opcionalmente, deixa o terminal visível. */
-    fun openProject(directory: File, openTerminal: Boolean = false) {
+    /** Abre o projeto no editor e, opcionalmente, deixa o terminal visível com comando inicial. */
+    fun openProject(directory: File, openTerminal: Boolean = false, initialCommand: String? = null) {
         try {
             if (!directory.exists()) {
                 directory.mkdirs()
@@ -178,7 +178,7 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             project = canonical
-            show(IdeFragment.newInstance(openTerminal))
+            show(IdeFragment.newInstance(openTerminal, initialCommand))
         } catch (error: Exception) {
             message("Não foi possível abrir o projeto: ${error.message ?: error.javaClass.simpleName}")
             show(ProjectsFragment())

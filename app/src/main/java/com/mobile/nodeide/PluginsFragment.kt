@@ -136,18 +136,18 @@ class PluginsFragment : Fragment() {
             PluginCard(
                 id = "mariadb",
                 name = "MariaDB",
-                description = "O aplicativo não empacota servidor MariaDB nem conector de rede.",
-                status = "SERVIDOR EXTERNO",
-                action = "Detalhes",
+                description = "Servidor MariaDB / MySQL local em files/usr/var/mysql (porta 3306). Compatível com Node.js (mysql/mysql2) e console SQL integrado.",
+                status = "LOCAL EMBUTIDO",
+                action = "Gerenciar",
                 icon = R.drawable.ic_mariadb,
                 accent = 0xff65bfd0.toInt()
             ),
             PluginCard(
                 id = "mysql",
                 name = "MySQL",
-                description = "O aplicativo não empacota servidor MySQL nem conector de rede.",
-                status = "SERVIDOR EXTERNO",
-                action = "Detalhes",
+                description = "Cliente e daemon MySQL/MariaDB locais. Suporta comandos mysql -u root, queries SQL e conexão TCP 127.0.0.1:3306.",
+                status = "LOCAL EMBUTIDO",
+                action = "Console SQL",
                 icon = R.drawable.ic_mysql,
                 accent = 0xff69a8e6.toInt()
             )
@@ -160,17 +160,123 @@ class PluginsFragment : Fragment() {
             "npm" -> npmDialog()
             "terminal" -> openTerminal()
             "sqlite" -> openSqlite()
-            "mariadb" -> details(
-                "MariaDB externo",
-                "MariaDB é um servidor de banco de dados. Esta versão não empacota o servidor nem um " +
-                    "conector para acessar outro servidor; por isso não existe instalação local funcional."
-            )
-            "mysql" -> details(
-                "MySQL externo",
-                "Esta versão não empacota o servidor MySQL nem um conector de rede. Para banco local, " +
-                    "use o console SQLite integrado."
-            )
+            "mariadb", "mysql" -> mariadbDialog()
         }
+    }
+
+    // ---- MariaDB / MySQL ----------------------------------------------------
+
+    private fun mariadbDialog() {
+        val runtime = main.runtime
+        val isRunning = runtime.mariadb.isRunning()
+        val options = arrayOf(
+            if (isRunning) "Parar Servidor MariaDB / MySQL (Porta 3306)" else "Iniciar Servidor MariaDB / MySQL (Porta 3306)",
+            "Abrir Console SQL no Terminal (mysql -u root)",
+            "Configurar arquivo .env no projeto",
+            "Copiar credenciais de conexão (.env)",
+            "Inicializar / Resetar banco de dados (var/mysql)",
+            "Diagnóstico e Instruções"
+        )
+
+        AlertDialog.Builder(main)
+            .setTitle("MariaDB / MySQL Local")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        if (isRunning) {
+                            work("Encerrando MariaDB") { progress ->
+                                progress("Finalizando servidor...")
+                                runtime.mariadb.stopDaemon()
+                                "Servidor MariaDB finalizado"
+                            }
+                        } else {
+                            work("Iniciando MariaDB") { progress ->
+                                progress("Iniciando daemon na porta 3306...")
+                                val started = runtime.mariadb.startDaemon { msg -> progress(msg) }
+                                if (started) "MariaDB em execução em 127.0.0.1:3306"
+                                else "Não foi possível iniciar o MariaDB na porta 3306"
+                            }
+                        }
+                    }
+                    1 -> openMysqlTerminal()
+                    2 -> configureEnv()
+                    3 -> copyEnvCredentials()
+                    4 -> resetDatabase()
+                    5 -> showMariadbDiagnostics()
+                }
+            }
+            .setNegativeButton("Fechar", null)
+            .show()
+    }
+
+    private fun openMysqlTerminal() {
+        val project = main.project?.takeIf { it.isDirectory } ?: try {
+            main.terminalWorkspace()
+        } catch (error: Exception) {
+            main.message(error.message ?: "Não foi possível abrir o terminal")
+            return
+        }
+        main.openProject(project, openTerminal = true, initialCommand = "mysql -u root")
+    }
+
+    private fun configureEnv() {
+        val project = main.project?.takeIf { it.isDirectory }
+        if (project == null) {
+            main.message("Abra um projeto antes de configurar o arquivo .env.")
+            return
+        }
+        try {
+            val envFile = main.runtime.mariadb.configureProjectEnv(project)
+            main.message("Arquivo .env atualizado com credenciais do MariaDB: ${envFile.name}")
+        } catch (e: Exception) {
+            main.message("Erro ao configurar .env: ${e.message}")
+        }
+    }
+
+    private fun copyEnvCredentials() {
+        val template = main.runtime.mariadb.getEnvTemplate()
+        val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("MariaDB .env", template))
+        main.message("Configurações do .env copiadas para a área de transferência!")
+    }
+
+    private fun resetDatabase() {
+        AlertDialog.Builder(main)
+            .setTitle("Resetar Banco de Dados")
+            .setMessage("Todos os bancos em files/usr/var/mysql serão reinicializados. Deseja continuar?")
+            .setPositiveButton("Resetar") { _, _ ->
+                work("Resetando banco de dados") { progress ->
+                    progress("Limpando var/mysql...")
+                    main.runtime.mariadb.initDatabase(force = true)
+                    "Banco de dados reinicializado com sucesso"
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun showMariadbDiagnostics() {
+        val mariadb = main.runtime.mariadb
+        val isRunning = mariadb.isRunning()
+        val message = buildString {
+            append("Estado: ").append(if (isRunning) "EM EXECUÇÃO (Porta 3306)\n" else "PARADO\n")
+            append("Host: 127.0.0.1\n")
+            append("Porta: 3306\n")
+            append("Usuário: root\n")
+            append("Senha: (sem senha por padrão)\n")
+            append("Diretório de dados: ").append(mariadb.dataDir.absolutePath).append("\n")
+            append("Configuração: ").append(mariadb.cnfFile.absolutePath).append("\n\n")
+            append("Como conectar no Node.js:\n")
+            append("const mysql = require('mysql2');\n")
+            append("const conn = mysql.createConnection({\n")
+            append("  host: '127.0.0.1',\n")
+            append("  port: 3306,\n")
+            append("  user: 'root',\n")
+            append("  password: '',\n")
+            append("  database: 'nodesphere_db'\n")
+            append("});\n")
+        }
+        details("Diagnóstico MariaDB / MySQL", message)
     }
 
     // ---- Node.js ------------------------------------------------------------
