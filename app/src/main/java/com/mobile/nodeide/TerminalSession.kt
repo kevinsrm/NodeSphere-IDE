@@ -403,24 +403,38 @@ class TerminalSession(
             }
         }
         pending.setLength(0)
+        killAllChildProcesses(-1)
     }
 
     /**
-     * Encerra os processos filhos do shell lendo `/proc/<pid>/task/<pid>/children`.
-     * Sem isso um `node server.js` continuaria rodando depois de "Parar".
+     * Encerra todos os processos filhos gerados pelo shell e quaisquer instâncias
+     * órfãs do Node.js vinculadas ao UID do app para evitar erros de porta em uso (EADDRINUSE).
+     */
+    fun killLingeringNodeProcesses() {
+        killAllChildProcesses(shellPid)
+    }
+
+    /**
+     * Encerra os processos filhos do shell lendo `/proc/<pid>/task/<pid>/children` e
+     * varrendo `/proc` para eliminar processos órfãos.
      */
     private fun killChildren(pid: Int) {
-        if (pid <= 0) return
-        try {
-            val file = File("/proc/$pid/task/$pid/children")
-            if (!file.isFile) return
-            for (value in file.readText().trim().split(' ')) {
-                val child = value.trim().toIntOrNull() ?: continue
-                if (child > 0) android.os.Process.killProcess(child)
+        if (pid > 0) {
+            try {
+                val file = File("/proc/$pid/task/$pid/children")
+                if (file.isFile) {
+                    for (value in file.readText().trim().split(' ')) {
+                        val child = value.trim().toIntOrNull() ?: continue
+                        if (child > 0) {
+                            android.os.Process.killProcess(child)
+                            try { android.os.Process.sendSignal(child, 9) } catch (ignored: Exception) {}
+                        }
+                    }
+                }
+            } catch (ignored: Exception) {
             }
-        } catch (error: Exception) {
-            Log.w(TAG, "Não foi possível encerrar os filhos do shell: ${error.message}")
         }
+        killAllChildProcesses(pid)
     }
 
     private fun write(data: String): Boolean {
@@ -576,7 +590,7 @@ class TerminalSession(
             path
         }
 
-    private companion object {
+    companion object {
         const val SHELL = "/system/bin/sh"
         const val MARKER = "__NODESPHERE_CWD__"
         const val MAX_HISTORY = 200
@@ -586,6 +600,52 @@ class TerminalSession(
         const val TAG = "NodeSphere"
 
         val BUILTINS = setOf("help", "runtime", "clear", "cls", "exit")
+
+        /**
+         * Varre `/proc` para encerrar todos os processos filhos e instâncias órfãs do Node.js
+         * pertencentes ao app, liberando portas e evitando erro EADDRINUSE.
+         */
+        fun killAllChildProcesses(targetPid: Int = -1) {
+            try {
+                val myPid = android.os.Process.myPid()
+                val procDir = File("/proc")
+                val entries = procDir.listFiles() ?: return
+                for (file in entries) {
+                    if (!file.isDirectory) continue
+                    val name = file.name
+                    if (!name.all { it.isDigit() }) continue
+                    val pid = name.toIntOrNull() ?: continue
+                    if (pid <= 1 || pid == myPid) continue
+
+                    try {
+                        val cmdlineFile = File(file, "cmdline")
+                        val cmdline = if (cmdlineFile.isFile) {
+                            cmdlineFile.readBytes().toString(Charsets.UTF_8).replace('\u0000', ' ').trim()
+                        } else ""
+
+                        val statFile = File(file, "stat")
+                        val statText = if (statFile.isFile) statFile.readText().trim() else ""
+                        val ppid = statText.split(' ').getOrNull(3)?.toIntOrNull() ?: -1
+
+                        val isTargetChild = targetPid > 0 && (ppid == targetPid || pid == targetPid)
+                        val isNodeOrNpm = cmdline.contains("node") || cmdline.contains("npm") || cmdline.contains("npx")
+                        val isAppChild = ppid == myPid
+
+                        if (isTargetChild || isNodeOrNpm || isAppChild) {
+                            Log.i(TAG, "Encerrando processo $pid ($cmdline)")
+                            android.os.Process.killProcess(pid)
+                            try {
+                                android.os.Process.sendSignal(pid, 9) // SIGKILL
+                            } catch (ignored: Exception) {
+                            }
+                        }
+                    } catch (ignored: Exception) {
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Erro ao varrer processos em /proc: ${e.message}")
+            }
+        }
 
         val HELP =
             "Comandos do NodeSphere:\r\n" +

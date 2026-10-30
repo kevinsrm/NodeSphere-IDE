@@ -56,6 +56,22 @@ class TerminalRow(columns: Int) {
 
     fun isReverse(column: Int): Boolean = column in 0 until width && reverse[column]
 
+    /** Retorna o índice da última coluna com caractere não-espaço ou com estilo de fundo ativo. */
+    fun lastUsedColumn(limit: Int = width): Int {
+        val maxCol = minOf(limit, width)
+        var index = maxCol - 1
+        while (index >= 0) {
+            val char = characterAt(index)
+            val bg = backgroundAt(index)
+            val rev = isReverse(index)
+            if (char != ' ' || bg != 0 || rev) {
+                return index
+            }
+            index--
+        }
+        return -1
+    }
+
     fun set(column: Int, char: Char, pen: TerminalPen) {
         if (column !in 0 until width) return
         chars[column] = char

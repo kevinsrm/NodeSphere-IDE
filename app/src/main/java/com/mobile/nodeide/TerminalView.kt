@@ -25,6 +25,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.inputmethod.BaseInputConnection
@@ -39,17 +40,18 @@ import kotlin.math.abs
 import kotlin.math.floor
 
 /**
- * Terminal com seleção e cópia nativas e detecção automática de links/localhost.
+ * Terminal com seleção/cópia nativas, suporte a modificador Ctrl, pinch-to-zoom e
+ * detecção automática de links de localhost.
  *
  * A saída do [TerminalEmulator] (grade de caracteres + ANSI) é renderizada num
  * [TextView] monoespaçado dentro de um [ScrollView].
  *
  * Recursos:
- * - Alinhamento em grade monoespaçada;
- * - Toque longo para seleção de texto e barra flutuante de ações;
- * - Detecção automática e conversão de URLs, localhost, endereços IP e frases de portas
- *   em links clicáveis com destaque visual;
- * - Abertura instantânea no navegador padrão ao tocar em links de localhost/servidor web.
+ * - Alinhamento e espaçamento limpos à esquerda sem espaços em branco artificiais;
+ * - Suporte a modificador Ctrl para enviar comandos de controle (`Ctrl+C`, `Ctrl+Z`, `Ctrl+D`);
+ * - Zoom por gesto de pinça (Pinch-to-zoom com [ScaleGestureDetector]);
+ * - Detecção automática de URLs e portas de localhost com links clicáveis;
+ * - Toque longo para seleção e barra nativa de copiar.
  */
 class TerminalView @JvmOverloads constructor(
     context: Context,
@@ -66,10 +68,19 @@ class TerminalView @JvmOverloads constructor(
     /** Callback opcional chamado quando um link é clicado. */
     var onUrlClick: ((String) -> Unit)? = null
 
+    /** Estado do modificador Ctrl ativo para a próxima tecla. */
+    var isCtrlActive: Boolean = false
+        private set
+
+    /** Notifica alterações no estado do botão Ctrl. */
+    var onCtrlStateChanged: ((Boolean) -> Unit)? = null
+
     private val emulator = TerminalEmulator()
     private val textView = TerminalTextView(context)
     private val handler = Handler(Looper.getMainLooper())
+    private var scaleDetector: ScaleGestureDetector? = null
 
+    private var currentTextSizeSp = DEFAULT_TEXT_SIZE_SP
     private var cellWidth = 1f
     private var cellHeight = 1f
     private var cursorOn = true
@@ -102,17 +113,14 @@ class TerminalView @JvmOverloads constructor(
 
         textView.apply {
             typeface = Typeface.MONOSPACE
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, TEXT_SIZE_SP)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, currentTextSizeSp)
             setTextColor(FOREGROUND)
             setPadding(0, 0, 0, 0)
             includeFontPadding = false
             gravity = Gravity.TOP or Gravity.START
             setLineSpacing(0f, 1f)
-            // O emulator já quebra as linhas em `columns`; desligar o wrap do
-            // TextView evita uma segunda quebra que desalinha a grade do `ls`.
             setHorizontallyScrolling(true)
             letterSpacing = 0f
-            // Desliga ligaduras para manter a grade monoespaçada alinhada.
             fontFeatureSettings = "'liga' 0, 'calt' 0"
             setTextIsSelectable(true)
             isFocusable = true
@@ -122,6 +130,21 @@ class TerminalView @JvmOverloads constructor(
         }
         addView(textView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
+        scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                val factor = detector.scaleFactor
+                if (factor.isNaN() || factor.isInfinite()) return false
+                val newSize = (currentTextSizeSp * factor).coerceIn(MIN_TEXT_SIZE_SP, MAX_TEXT_SIZE_SP)
+                if (abs(newSize - currentTextSizeSp) >= 0.25f) {
+                    currentTextSizeSp = newSize
+                    textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, currentTextSizeSp)
+                    measureCells(width, height)
+                    scheduleRender()
+                }
+                return true
+            }
+        })
+
         setOnScrollChangeListener { _, _, y, _, _ ->
             val child = getChildAt(0) ?: return@setOnScrollChangeListener
             autoScroll = y + height >= child.height - cellHeight.toInt()
@@ -130,7 +153,21 @@ class TerminalView @JvmOverloads constructor(
         handler.postDelayed(blink, BLINK_MILLIS)
     }
 
-    // ---- API usada pelo editor ---------------------------------------------
+    // ---- API do Terminal ----------------------------------------------------
+
+    /** Alterna o estado do modificador Ctrl (para enviar Ctrl+C, Ctrl+Z, etc.). */
+    fun toggleCtrl(): Boolean {
+        isCtrlActive = !isCtrlActive
+        onCtrlStateChanged?.invoke(isCtrlActive)
+        return isCtrlActive
+    }
+
+    fun setCtrl(active: Boolean) {
+        if (isCtrlActive != active) {
+            isCtrlActive = active
+            onCtrlStateChanged?.invoke(isCtrlActive)
+        }
+    }
 
     /** Escreve a saída do processo (aceita ANSI) na tela. */
     fun feed(text: String) {
@@ -149,6 +186,23 @@ class TerminalView @JvmOverloads constructor(
     fun type(text: String) {
         if (text.isEmpty()) return
         collapseSelection()
+        if (isCtrlActive) {
+            setCtrl(false)
+            val char = text.first()
+            val code = when (char) {
+                in 'a'..'z' -> ((char.code - 'a'.code) + 1).toChar().toString()
+                in 'A'..'Z' -> ((char.code - 'A'.code) + 1).toChar().toString()
+                '[' -> "\u001b"
+                '\\' -> "\u001c"
+                ']' -> "\u001d"
+                '^' -> "\u001e"
+                '_' -> "\u001f"
+                '@', ' ' -> "\u0000"
+                else -> text
+            }
+            onInput?.invoke(code)
+            return
+        }
         onInput?.invoke(text)
     }
 
@@ -239,7 +293,7 @@ class TerminalView @JvmOverloads constructor(
         cellWidth = paint.measureText("0").coerceAtLeast(1f)
         val usableWidth = (width - paddingLeft - paddingRight).coerceAtLeast(1).toFloat()
         val usableHeight = (height - paddingTop - paddingBottom).coerceAtLeast(1).toFloat()
-        val columns = floor(usableWidth / cellWidth).toInt().coerceIn(20, 400)
+        val columns = floor(usableWidth / cellWidth).toInt().coerceIn(MIN_COLUMNS_VIEW, 400)
         val rows = floor(usableHeight / cellHeight).toInt().coerceIn(4, 200)
         if (columns != emulator.columns || rows != emulator.rows) {
             emulator.resize(columns, rows)
@@ -256,9 +310,8 @@ class TerminalView @JvmOverloads constructor(
     }
 
     /**
-     * Constrói o texto completo (histórico + tela) com spans de cor/estilo e links clicáveis.
-     * Enquanto o usuário mantém uma seleção ativa, a reconstrução é adiada para
-     * não destruir a seleção; o emulator continua acumulando a saída.
+     * Constrói o texto completo (histórico + tela) com alinhamento limpo à esquerda,
+     * spans de cor/estilo e links clicáveis.
      */
     private fun render() {
         try {
@@ -272,12 +325,27 @@ class TerminalView @JvmOverloads constructor(
             val scrollback = emulator.scrollbackSize
 
             for (index in 0 until scrollback) {
-                emulator.scrollbackRow(index)?.let { appendRow(builder, it, columns) }
+                val row = emulator.scrollbackRow(index)
+                if (row != null) {
+                    appendRow(builder, row, columns)
+                }
                 builder.append('\n')
             }
-            for (index in 0 until emulator.rows) {
-                emulator.screenRow(index)?.let { appendRow(builder, it, columns) }
-                if (index < emulator.rows - 1) builder.append('\n')
+
+            // Apenas renderiza linhas ativas da tela até o cursor ou última linha com conteúdo
+            val lastActiveScreenRow = maxOf(
+                emulator.cursorRow,
+                (0 until emulator.rows).lastOrNull { (emulator.screenRow(it)?.lastUsedColumn(columns) ?: -1) >= 0 } ?: 0
+            )
+
+            for (index in 0..lastActiveScreenRow) {
+                val row = emulator.screenRow(index)
+                if (row != null) {
+                    appendRow(builder, row, columns)
+                }
+                if (index < lastActiveScreenRow) {
+                    builder.append('\n')
+                }
             }
 
             // Aplica detecção automática de links (localhost, URLs, portas)
@@ -296,8 +364,14 @@ class TerminalView @JvmOverloads constructor(
     }
 
     private fun appendRow(builder: SpannableStringBuilder, row: TerminalRow, columns: Int) {
+        val lastUsed = row.lastUsedColumn(columns)
+        if (lastUsed < 0) {
+            // Linha vazia: nenhum caractere extra antes da quebra de linha
+            return
+        }
+        val limit = minOf(lastUsed + 1, columns)
         var column = 0
-        while (column < columns) {
+        while (column < limit) {
             val foreground = row.foregroundAt(column)
             val background = row.backgroundAt(column)
             val bold = row.isBold(column)
@@ -305,7 +379,7 @@ class TerminalView @JvmOverloads constructor(
             val reverse = row.isReverse(column)
             val start = builder.length
             var next = column
-            while (next < columns &&
+            while (next < limit &&
                 row.foregroundAt(next) == foreground &&
                 row.backgroundAt(next) == background &&
                 row.isBold(next) == bold &&
@@ -475,14 +549,26 @@ class TerminalView @JvmOverloads constructor(
 
     // ---- teclado e toque ----------------------------------------------------
 
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        scaleDetector?.onTouchEvent(ev)
+        if (scaleDetector?.isInProgress == true) return true
+        return super.onInterceptTouchEvent(ev)
+    }
+
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        scaleDetector?.onTouchEvent(ev)
+        if (scaleDetector?.isInProgress == true) return true
+        return super.onTouchEvent(ev)
+    }
+
     private fun handleInput(data: String) {
         if (data.isEmpty()) return
         collapseSelection()
-        onInput?.invoke(data)
+        type(data)
     }
 
     private fun handleKey(event: KeyEvent): Boolean {
-        val control = event.isCtrlPressed
+        val control = event.isCtrlPressed || isCtrlActive
         when (event.keyCode) {
             KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                 type("\r"); return true
@@ -527,13 +613,18 @@ class TerminalView @JvmOverloads constructor(
         }
         val unicode = event.getUnicodeChar(0)
         if (control && unicode in 'a'.code..'z'.code) {
-            type(((unicode - 'a'.code) + 1).toChar().toString()); return true
+            setCtrl(false)
+            type(((unicode - 'a'.code) + 1).toChar().toString())
+            return true
         }
         if (control && unicode in 'A'.code..'Z'.code) {
-            type(((unicode - 'A'.code) + 1).toChar().toString()); return true
+            setCtrl(false)
+            type(((unicode - 'A'.code) + 1).toChar().toString())
+            return true
         }
-        if (unicode > 0 && !control) {
-            type(unicode.toChar().toString()); return true
+        if (unicode > 0) {
+            type(unicode.toChar().toString())
+            return true
         }
         return false
     }
@@ -548,6 +639,9 @@ class TerminalView @JvmOverloads constructor(
         private var downTime = 0L
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
+            scaleDetector?.onTouchEvent(event)
+            if (scaleDetector?.isInProgress == true) return true
+
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = event.x
@@ -667,7 +761,10 @@ class TerminalView @JvmOverloads constructor(
 
     private companion object {
         const val TAG = "TerminalView"
-        const val TEXT_SIZE_SP = 12.5f
+        const val DEFAULT_TEXT_SIZE_SP = 12.5f
+        const val MIN_TEXT_SIZE_SP = 8.0f
+        const val MAX_TEXT_SIZE_SP = 28.0f
+        const val MIN_COLUMNS_VIEW = 20
         const val BLINK_MILLIS = 500L
 
         val BACKGROUND = 0xff070b16.toInt()

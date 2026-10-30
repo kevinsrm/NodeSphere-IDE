@@ -129,14 +129,16 @@ class NodeRuntime(context: Context) {
      * globais e o Node não acha o registry local.
      */
     fun environment(directory: File? = null): Map<String, String> {
-        val systemPath = System.getenv("PATH") ?: DEFAULT_PATH
-        val path = buildString {
-            append(bin.absolutePath)
-            for (entry in systemPath.split(':')) {
-                if (entry.isEmpty() || entry == bin.absolutePath) continue
-                append(':').append(entry)
-            }
+        val pathEntries = LinkedHashSet<String>()
+        pathEntries.add(bin.absolutePath)
+        (System.getenv("PATH") ?: DEFAULT_PATH).split(':').forEach { entry ->
+            val trimmed = entry.trim()
+            if (trimmed.isNotEmpty()) pathEntries.add(trimmed)
         }
+        for (std in listOf("/system/bin", "/system/xbin", "/sbin", "/vendor/bin", "/apex/com.android.runtime/bin", "/apex/com.android.art/bin")) {
+            pathEntries.add(std)
+        }
+        val path = pathEntries.joinToString(":")
         val working = directory ?: home
         val environment = HashMap<String, String>()
         environment["HOME"] = home.absolutePath
@@ -891,7 +893,7 @@ class NodeRuntime(context: Context) {
         const val FALLBACK_NPM = "10.9.2"
         const val NPM_PACKAGE = "https://registry.npmjs.org/npm/-/npm-{version}.tgz"
         const val SHELL = "/system/bin/sh"
-        const val DEFAULT_PATH = "/sbin:/system/bin:/system/xbin:/vendor/bin"
+        const val DEFAULT_PATH = "/system/bin:/system/xbin:/sbin:/vendor/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin"
 
         /** Interpretador de binários Android; qualquer outro caminho é glibc. */
         const val BIONIC_PREFIX = "/system/bin/linker"
