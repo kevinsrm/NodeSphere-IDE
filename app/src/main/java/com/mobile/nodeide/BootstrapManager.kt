@@ -9,9 +9,9 @@ import java.nio.file.Files
 /**
  * Gerenciador de inicialização do runtime Node.js no NodeSphere.
  * Realiza a extração automática e Plug and Play do binário Node.js embutido
- * no APK (`assets/node/node`) para o diretório de execução privado
- * (`files/usr/bin/node`), bem como de todas as bibliotecas compartilhadas
- * (`assets/node/*.so*`) para o diretório de bibliotecas (`files/usr/lib/`),
+ * no APK (assets/node/node) para o diretório de execução privado
+ * (files/usr/bin/node), bem como de todas as bibliotecas compartilhadas
+ * (arquivos .so de assets/node) para o diretório de bibliotecas (files/usr/lib/),
  * aplicando imediatamente as permissões de execução e ajustando os RUNPATHs.
  */
 object BootstrapManager {
@@ -159,7 +159,7 @@ object BootstrapManager {
         if (destination.exists()) return
         try {
             Files.createSymbolicLink(destination.toPath(), source.toPath())
-        } catch (_: Exception) {
+        } catch (ignored: Exception) {
             try {
                 source.copyTo(destination, overwrite = true)
                 setExecutablePermissions(destination)

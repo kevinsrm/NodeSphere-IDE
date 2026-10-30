@@ -387,7 +387,7 @@ class TerminalSession(
         closed = true
         try {
             writer?.close()
-        } catch (_: Exception) {
+        } catch (ignored: Exception) {
         }
         writer = null
         val current = process
@@ -395,11 +395,11 @@ class TerminalSession(
         if (current != null) {
             try {
                 current.destroy()
-            } catch (_: Exception) {
+            } catch (ignored: Exception) {
             }
             try {
                 if (current.isAlive) current.destroyForcibly()
-            } catch (_: Exception) {
+            } catch (ignored: Exception) {
             }
         }
         pending.setLength(0)
@@ -446,11 +446,11 @@ class TerminalSession(
                     handler.post { consume(chunk) }
                 }
             }
-        } catch (_: Exception) {
+        } catch (ignored: Exception) {
         }
         val code = try {
             started.waitFor()
-        } catch (_: Exception) {
+        } catch (ignored: Exception) {
             -1
         }
         handler.post {
@@ -565,7 +565,7 @@ class TerminalSession(
 
     private fun pathOf(file: File): String = try {
         file.canonicalPath
-    } catch (_: Exception) {
+    } catch (ignored: Exception) {
         file.absolutePath
     }
 
