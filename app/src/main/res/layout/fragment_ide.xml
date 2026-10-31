@@ -109,10 +109,28 @@
     <LinearLayout
         android:id="@+id/terminalPanel"
         android:layout_width="match_parent"
-        android:layout_height="220dp"
+        android:layout_height="240dp"
         android:visibility="gone"
         android:orientation="vertical"
         android:background="#070B16">
+
+        <!-- Barra de Abas de Múltiplas Sessões do Terminal (SmartIDE / Termux) -->
+        <HorizontalScrollView
+            android:id="@+id/terminalTabsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="34dp"
+            android:background="#0E1626"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/terminalTabs"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp" />
+        </HorizontalScrollView>
 
         <!-- Terminal oficial do Termux com suporte completo a cores ANSI 256,
              cursor piscante, seleção nativa, histórico amplo e zoom sem distorção. -->

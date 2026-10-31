@@ -258,6 +258,9 @@ public final class TerminalView extends View {
             }
         });
         mScroller = new Scroller(context);
+        int defaultTextSize = (int) (13 * context.getResources().getDisplayMetrics().scaledDensity);
+        if (defaultTextSize < 12) defaultTextSize = 24;
+        mRenderer = new TerminalRenderer(defaultTextSize, Typeface.MONOSPACE);
         AccessibilityManager am = (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
         mAccessibilityEnabled = am.isEnabled();
     }
@@ -289,20 +292,38 @@ public final class TerminalView extends View {
      * @param session The {@link TerminalSession} this view will be displaying.
      */
     public boolean attachSession(TerminalSession session) {
-        if (session == mTermSession) return false;
-
         mTermSession = session;
-        mEmulator = null;
         mCombiningAccent = 0;
 
-        // The emulator's cached value will be read in `updateSize()` when emulator is set.
+        if (mRenderer == null) {
+            int defaultTextSize = (int) (13 * getContext().getResources().getDisplayMetrics().scaledDensity);
+            if (defaultTextSize < 12) defaultTextSize = 24;
+            mRenderer = new TerminalRenderer(defaultTextSize, Typeface.MONOSPACE);
+        }
+
+        if (session != null) {
+            if (session.getEmulator() == null) {
+                session.updateSize(80, 24, (int) mRenderer.getFontWidth(), mRenderer.getFontLineSpacing());
+            }
+            mEmulator = session.getEmulator();
+            if (mTerminalCursorBlinkerRunnable != null) {
+                mTerminalCursorBlinkerRunnable.setEmulator(mEmulator);
+            }
+        } else {
+            mEmulator = null;
+        }
+
         setTopRow(0, false);
-
         updateSize();
-
-        // Wait with enabling the scrollbar until we have a terminal to get scroll position from.
         setVerticalScrollBarEnabled(true);
-
+        post(new Runnable() {
+            @Override
+            public void run() {
+                updateSize();
+                invalidate();
+            }
+        });
+        invalidate();
         return true;
     }
 
@@ -1020,9 +1041,26 @@ public final class TerminalView extends View {
     }
 
     @Override
+    protected void onVisibilityChanged(View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        if (visibility == View.VISIBLE) {
+            post(new Runnable() {
+                @Override
+                public void run() {
+                    updateSize();
+                    invalidate();
+                }
+            });
+        }
+    }
+
+    @Override
     protected void onDraw(Canvas canvas) {
         if (mEmulator == null) {
-            canvas.drawColor(0XFF000000);
+            canvas.drawColor(0XFF070B16);
+            if (mTermSession != null && getWidth() > 0 && getHeight() > 0) {
+                updateSize();
+            }
         } else {
             // render the terminal view and highlight any selected text
             int[] sel = mDefaultSelectors;
