@@ -27,6 +27,7 @@ import com.termux.terminal.DefaultTerminalSessionClient
 import com.termux.terminal.TerminalSession
 import com.termux.view.DefaultTerminalViewClient
 import com.termux.view.TerminalView
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.util.ArrayDeque
@@ -83,7 +84,7 @@ class IdeFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View {
         val root = inflater.inflate(R.layout.fragment_ide, container, false)
-        return try {
+        try {
             main = requireActivity() as MainActivity
             runtime = main.runtime
             val directory = main.project
@@ -270,11 +271,11 @@ class IdeFragment : Fragment() {
             )
 
             defaultFile(project)?.let(::openFile)
-            root
         } catch (error: Exception) {
             android.util.Log.e(TAG, "Falha ao abrir o editor", error)
             failure(error)
         }
+        return root
     }
 
     // ---- terminal engine termux ---------------------------------------------
@@ -284,17 +285,23 @@ class IdeFragment : Fragment() {
             session?.finishIfRunning()
         } catch (ignored: Exception) {}
 
-        val binDir = runtime.binDir
-        val libDir = runtime.libDir
-        val homeDir = runtime.homeDir
-        val tmpDir = runtime.tmpDir
-        val prefixDir = runtime.prefixDir
+        val prefixDir = File(requireContext().filesDir, "usr")
+        val binDir = File(prefixDir, "bin")
+        val libDir = File(prefixDir, "lib")
+        val homeDir = File(requireContext().filesDir, "home")
+        val tmpDir = File(prefixDir, "tmp")
+
+        if (!prefixDir.exists()) prefixDir.mkdirs()
+        if (!binDir.exists()) binDir.mkdirs()
+        if (!libDir.exists()) libDir.mkdirs()
+        if (!homeDir.exists()) homeDir.mkdirs()
+        if (!tmpDir.exists()) tmpDir.mkdirs()
 
         val bashFile = File(binDir, "bash")
         val shFile = File(binDir, "sh")
         val shellPath = when {
-            bashFile.canExecute() -> bashFile.absolutePath
-            shFile.canExecute() -> shFile.absolutePath
+            bashFile.exists() && bashFile.canExecute() -> bashFile.absolutePath
+            shFile.exists() && shFile.canExecute() -> shFile.absolutePath
             else -> "/system/bin/sh"
         }
 
@@ -349,11 +356,7 @@ class IdeFragment : Fragment() {
 
         terminal.setTerminalViewClient(object : DefaultTerminalViewClient(terminal) {
             override fun readControlKey(): Boolean {
-                val active = isCtrlActive
-                if (active) {
-                    // Após consumir a tecla com Ctrl, podemos manter ou resetar conforme preferência
-                }
-                return active
+                return isCtrlActive
             }
 
             override fun onSingleTapUp(e: MotionEvent?) {
@@ -483,7 +486,7 @@ class IdeFragment : Fragment() {
         scroll.visibility = View.VISIBLE
         bar.removeAllViews()
 
-        for (url in detectedUrls.takeLast(5)) {
+        for (url in detectedUrls.toList().takeLast(5)) {
             val pill = TextView(main).apply {
                 text = "🌐 $url"
                 setTextColor(0xff38bdf8.toInt())
