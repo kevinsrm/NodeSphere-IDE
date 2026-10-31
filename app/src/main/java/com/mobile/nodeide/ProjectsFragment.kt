@@ -153,6 +153,8 @@ class ProjectsFragment : Fragment() {
             .show()
     }
 
+    @Deprecated("Deprecated in Java")
+    @Suppress("DEPRECATION")
     override fun onActivityResult(request: Int, result: Int, data: Intent?) {
         super.onActivityResult(request, result, data)
         if (result != Activity.RESULT_OK) return
