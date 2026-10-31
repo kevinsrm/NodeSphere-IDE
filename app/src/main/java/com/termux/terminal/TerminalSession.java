@@ -195,18 +195,28 @@ public final class TerminalSession extends TerminalOutput {
         if (!ptyStarted) {
             startProcessWithProcessBuilder(columns, rows);
         }
+
+        try {
+            String sessionLabel = (mSessionName != null && !mSessionName.isEmpty()) ? mSessionName : "Terminal";
+            String welcome = "\u001b[1;36m━━ NodeSphere Shell [" + sessionLabel + "] ━━\u001b[0m\r\n";
+            byte[] welcomeBytes = welcome.getBytes(StandardCharsets.UTF_8);
+            mEmulator.append(welcomeBytes, welcomeBytes.length);
+            notifyScreenUpdate();
+        } catch (Throwable ignored) {}
     }
 
     private void startProcessWithProcessBuilder(int columns, int rows) {
         try {
             List<String> commandList = new ArrayList<>();
             commandList.add(mShellPath != null ? mShellPath : "/system/bin/sh");
-            if (mArgs != null) {
+            if (mArgs != null && mArgs.length > 0) {
                 for (String arg : mArgs) {
                     if (arg != null && !arg.isEmpty()) {
                         commandList.add(arg);
                     }
                 }
+            } else {
+                commandList.add("-i");
             }
 
             ProcessBuilder pb = new ProcessBuilder(commandList);

@@ -38,11 +38,17 @@ import kotlin.math.abs
 
 /**
  * Editor do projeto com árvore de arquivos, abas, barra de símbolos, undo/redo e
- * terminal integrado oficial do Termux (com suporte a cores ANSI 256, cursor piscante,
- * redimensionamento com o teclado adjustResize, detecção de localhost clicável e
- * controle total por atalhos e tecla Ctrl).
+ * terminal integrado oficial do Termux com suporte completo a múltiplas abas/sessões
+ * (Terminal 1, Terminal 2, ..., botão + e botão x), cores ANSI 256, cursor piscante,
+ * redimensionamento com o teclado virtual (adjustResize) e detecção de links localhost.
  */
 class IdeFragment : Fragment() {
+
+    data class TerminalTab(
+        val id: Int,
+        var title: String,
+        val session: TerminalSession
+    )
 
     private lateinit var main: MainActivity
     private lateinit var runtime: NodeRuntime
@@ -54,9 +60,16 @@ class IdeFragment : Fragment() {
     private lateinit var terminal: TerminalView
     private lateinit var project: File
 
+    private lateinit var terminalTabsContainer: LinearLayout
+    private lateinit var terminalTabsScroll: HorizontalScrollView
+
     private var linkScroll: HorizontalScrollView? = null
     private var linkBar: LinearLayout? = null
     private val detectedUrls = LinkedHashSet<String>()
+
+    private val terminalTabs = mutableListOf<TerminalTab>()
+    private var activeTabIndex = 0
+    private var nextTabNumber = 1
 
     private var currentFile: File? = null
     private var loading = false
@@ -67,7 +80,6 @@ class IdeFragment : Fragment() {
     private var dragStartHeight = 0
     private var dragging = false
 
-    private var session: TerminalSession? = null
     private var isCtrlActive = false
     private var currentFontSize = 13
 
@@ -115,11 +127,40 @@ class IdeFragment : Fragment() {
             tabs = root.findViewById(R.id.tabs)
             panel = root.findViewById(R.id.terminalPanel)
             terminal = root.findViewById(R.id.terminal)
+            terminalTabsContainer = root.findViewById(R.id.terminalTabs)
+            terminalTabsScroll = root.findViewById(R.id.terminalTabsScroll)
             linkScroll = root.findViewById(R.id.linkScroll)
             linkBar = root.findViewById(R.id.linkBar)
 
-            // Inicializa a sessão do Termux apontando para o shell com injeção completa de ambiente
-            startShellSession()
+            // Configura o cliente de visualização do Termux
+            terminal.setTerminalViewClient(object : DefaultTerminalViewClient(terminal) {
+                override fun readControlKey(): Boolean {
+                    return isCtrlActive
+                }
+
+                override fun onSingleTapUp(e: MotionEvent?) {
+                    if (e != null) {
+                        handleTerminalTap(e)
+                    }
+                    terminal.focusTerminal()
+                }
+
+                override fun onScale(scale: Float): Float {
+                    if (scale < 0.9f || scale > 1.1f) {
+                        val increase = scale > 1.0f
+                        changeFontSize(increase)
+                        return 1.0f
+                    }
+                    return scale
+                }
+            })
+
+            // Inicializa a primeira aba do terminal oficial do Termux
+            if (terminalTabs.isEmpty()) {
+                createNewTerminalSession()
+            } else {
+                selectTerminalTab(activeTabIndex)
+            }
 
             tree.layoutManager = LinearLayoutManager(main)
             rows = Rows { position ->
@@ -192,7 +233,7 @@ class IdeFragment : Fragment() {
             button(keys, "↓") { terminal.type("\u001b[B") }
             button(keys, "⏎") { terminal.type("\r") }
             button(keys, "clear") {
-                session?.reset()
+                getActiveSession()?.reset()
                 terminal.type("clear\n")
             }
             button(keys, "⧉ Copiar") { terminal.copySelectionOrAll() }
@@ -278,18 +319,22 @@ class IdeFragment : Fragment() {
         return root
     }
 
-    // ---- terminal engine termux ---------------------------------------------
+    // ---- gerenciador de abas e sessões do termux ----------------------------
 
-    private fun startShellSession() {
-        try {
-            session?.finishIfRunning()
-        } catch (ignored: Exception) {}
+    private fun createNewTerminalSession(initialCommand: String? = null): TerminalTab {
+        val tabNum = nextTabNumber++
+        val tabTitle = "Terminal $tabNum"
 
         val prefixDir = File(requireContext().filesDir, "usr")
         val binDir = File(prefixDir, "bin")
         val libDir = File(prefixDir, "lib")
         val homeDir = File(requireContext().filesDir, "home")
         val tmpDir = File(prefixDir, "tmp")
+        val workspaceDir = if (::project.isInitialized && project.exists()) {
+            project
+        } else {
+            File(requireContext().filesDir, "terminal-workspace").apply { mkdirs() }
+        }
 
         if (!prefixDir.exists()) prefixDir.mkdirs()
         if (!binDir.exists()) binDir.mkdirs()
@@ -306,7 +351,7 @@ class IdeFragment : Fragment() {
         }
 
         val envList = arrayOf(
-            "PATH=${binDir.absolutePath}:" + (System.getenv("PATH") ?: "/system/bin"),
+            "PATH=${binDir.absolutePath}:/system/bin:/system/xbin:" + (System.getenv("PATH") ?: ""),
             "HOME=${homeDir.absolutePath}",
             "TMPDIR=${tmpDir.absolutePath}",
             "LD_LIBRARY_PATH=${libDir.absolutePath}",
@@ -320,18 +365,28 @@ class IdeFragment : Fragment() {
 
         val newSession = TerminalSession(
             shellPath,
-            project.absolutePath,
+            workspaceDir.absolutePath,
             null,
             envList,
             2000,
             object : DefaultTerminalSessionClient() {
                 override fun onTextChanged(changedSession: TerminalSession) {
-                    terminal.onScreenUpdated()
-                    scanTerminalForUrls(changedSession)
+                    if (getActiveSession() == changedSession) {
+                        terminal.onScreenUpdated()
+                        scanTerminalForUrls(changedSession)
+                    }
                 }
 
                 override fun onSessionFinished(finishedSession: TerminalSession) {
-                    android.util.Log.i(TAG, "Shell finalizado com código ${finishedSession.exitStatus}")
+                    main.runOnUiThread {
+                        renderTerminalTabs()
+                    }
+                }
+
+                override fun onTitleChanged(changedSession: TerminalSession) {
+                    main.runOnUiThread {
+                        renderTerminalTabs()
+                    }
                 }
 
                 override fun onCopyTextToClipboard(s: TerminalSession, text: String?) {
@@ -352,32 +407,121 @@ class IdeFragment : Fragment() {
             }
         )
 
-        session = newSession
+        newSession.mSessionName = tabTitle
+        val tab = TerminalTab(tabNum, tabTitle, newSession)
+        terminalTabs.add(tab)
+        selectTerminalTab(terminalTabs.size - 1)
 
-        terminal.setTerminalViewClient(object : DefaultTerminalViewClient(terminal) {
-            override fun readControlKey(): Boolean {
-                return isCtrlActive
-            }
+        if (!initialCommand.isNullOrBlank()) {
+            newSession.write(initialCommand + "\n")
+        }
 
-            override fun onSingleTapUp(e: MotionEvent?) {
-                if (e != null) {
-                    handleTerminalTap(e)
-                }
-                terminal.focusTerminal()
-            }
+        return tab
+    }
 
-            override fun onScale(scale: Float): Float {
-                if (scale < 0.9f || scale > 1.1f) {
-                    val increase = scale > 1.0f
-                    changeFontSize(increase)
-                    return 1.0f
-                }
-                return scale
-            }
-        })
+    private fun selectTerminalTab(index: Int) {
+        if (terminalTabs.isEmpty()) return
+        activeTabIndex = maxOf(0, minOf(index, terminalTabs.size - 1))
+        val tab = terminalTabs[activeTabIndex]
 
         terminal.setTextSize(currentFontSize)
-        terminal.attachSession(newSession)
+        terminal.attachSession(tab.session)
+        terminal.onScreenUpdated()
+
+        renderTerminalTabs()
+        scanTerminalForUrls(tab.session)
+
+        // Rola a barra de abas para manter a aba ativa visível
+        terminalTabsScroll.post {
+            val child = terminalTabsContainer.getChildAt(activeTabIndex)
+            if (child != null) {
+                terminalTabsScroll.smoothScrollTo(child.left, 0)
+            }
+        }
+    }
+
+    private fun closeTerminalTab(index: Int) {
+        if (index !in terminalTabs.indices) return
+        val tabToClose = terminalTabs[index]
+        try {
+            tabToClose.session.finishIfRunning()
+        } catch (ignored: Exception) {}
+
+        terminalTabs.removeAt(index)
+        if (terminalTabs.isEmpty()) {
+            createNewTerminalSession()
+        } else {
+            activeTabIndex = maxOf(0, minOf(activeTabIndex, terminalTabs.size - 1))
+            selectTerminalTab(activeTabIndex)
+        }
+        renderTerminalTabs()
+    }
+
+    private fun renderTerminalTabs() {
+        if (!::terminalTabsContainer.isInitialized) return
+        terminalTabsContainer.removeAllViews()
+
+        for ((i, tab) in terminalTabs.withIndex()) {
+            val isActive = (i == activeTabIndex)
+
+            val tabLayout = LinearLayout(main).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(24, 8, 16, 8)
+                setBackgroundColor(if (isActive) 0xFF1E293B.toInt() else 0xFF0F172A.toInt())
+            }
+
+            val titleView = TextView(main).apply {
+                text = ">_ ${tab.title}"
+                textSize = 12f
+                typeface = Typeface.MONOSPACE
+                setTextColor(if (isActive) 0xFF38BDF8.toInt() else 0xFF94A3B8.toInt())
+                if (isActive) setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+                setOnClickListener { selectTerminalTab(i) }
+            }
+            tabLayout.addView(titleView)
+
+            val closeView = TextView(main).apply {
+                text = " ×"
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(if (isActive) 0xFF94A3B8.toInt() else 0xFF64748B.toInt())
+                setPadding(12, 0, 4, 0)
+                setOnClickListener { closeTerminalTab(i) }
+            }
+            tabLayout.addView(closeView)
+
+            val params = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ).apply {
+                marginEnd = 8
+            }
+            terminalTabsContainer.addView(tabLayout, params)
+        }
+
+        // Botão de Nova Aba (+)
+        val addBtn = TextView(main).apply {
+            text = "＋"
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(0xFF38BDF8.toInt())
+            setBackgroundColor(0xFF1E293B.toInt())
+            setPadding(24, 0, 24, 0)
+            setOnClickListener {
+                createNewTerminalSession()
+            }
+        }
+        val addParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        terminalTabsContainer.addView(addBtn, addParams)
+    }
+
+    private fun getActiveSession(): TerminalSession? {
+        return terminalTabs.getOrNull(activeTabIndex)?.session
     }
 
     private fun changeFontSize(increase: Boolean) {
@@ -406,27 +550,29 @@ class IdeFragment : Fragment() {
         }
     }
 
-    /** Envia uma linha de comando ao shell. */
+    /** Envia uma linha de comando ao shell da sessão ativa. */
     private fun submitCommand(raw: String) {
         val line = raw.trim()
         if (line.isEmpty()) return
-        val current = session
+        var current = getActiveSession()
         if (current == null || !current.isRunning) {
-            startShellSession()
+            val tab = createNewTerminalSession()
+            current = tab.session
         }
-        session?.write(line + "\n")
+        current.write(line + "\n")
     }
 
     private fun stopShell() {
         TerminalSession.killAllChildProcesses()
-        val current = session
-        if (current != null && current.isRunning) {
-            current.finishIfRunning()
+        val currentTab = terminalTabs.getOrNull(activeTabIndex)
+        if (currentTab != null) {
+            closeTerminalTab(activeTabIndex)
+        } else {
+            createNewTerminalSession()
         }
-        startShellSession()
         terminal.postDelayed({
             terminal.type("\r\n")
-            main.message("Processos interrompidos e shell reiniciado")
+            main.message("Processos interrompidos e terminal reiniciado")
         }, 150L)
     }
 
@@ -434,9 +580,10 @@ class IdeFragment : Fragment() {
         val opening = panel.visibility != View.VISIBLE
         panel.visibility = if (opening) View.VISIBLE else View.GONE
         if (opening) {
-            val current = session
-            if (current == null || !current.isRunning) {
-                startShellSession()
+            if (terminalTabs.isEmpty()) {
+                createNewTerminalSession()
+            } else {
+                selectTerminalTab(activeTabIndex)
             }
             terminal.post { terminal.focusTerminal() }
         } else {
@@ -514,7 +661,7 @@ class IdeFragment : Fragment() {
             val colRow = terminal.getColumnAndRow(event, true)
             val col = colRow[0]
             val row = colRow[1]
-            val emulator = session?.emulator ?: return
+            val emulator = getActiveSession()?.emulator ?: return
             val screen = emulator.screen ?: return
             val line = screen.getSelectedText(0, row, emulator.columns - 1, row)
             if (!line.isNullOrBlank()) {
@@ -882,8 +1029,10 @@ class IdeFragment : Fragment() {
 
     override fun onDestroyView() {
         try {
-            session?.finishIfRunning()
-            session = null
+            for (tab in terminalTabs) {
+                tab.session.finishIfRunning()
+            }
+            terminalTabs.clear()
         } catch (ignored: Exception) {
         }
         super.onDestroyView()
