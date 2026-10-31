@@ -160,6 +160,10 @@ class IdeFragment : Fragment() {
 
             // Teclas do terminal: mandam as mesmas sequências de um teclado real.
             val keys = root.findViewById<LinearLayout>(R.id.keys)
+            val stopBtn = button(keys, "⏹ Parar") { stopShell() }
+            stopBtn.setTextColor(0xffef4444.toInt())
+            stopBtn.setTypeface(null, android.graphics.Typeface.BOLD)
+
             val ctrlBtn = button(keys, "Ctrl") {
                 terminal.toggleCtrl()
             }

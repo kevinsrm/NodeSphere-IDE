@@ -99,12 +99,10 @@ class MainActivity : AppCompatActivity() {
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
-            val keyboard = if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
-                insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-            } else {
-                0
-            }
-            view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, keyboard))
+            val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+            val imeBottom = if (imeVisible) insets.getInsets(WindowInsetsCompat.Type.ime()).bottom else 0
+            val bottomPadding = if (imeVisible) maxOf(bars.bottom, imeBottom) else bars.bottom
+            view.setPadding(bars.left, bars.top, bars.right, bottomPadding)
             insets
         }
         ViewCompat.requestApplyInsets(root)
