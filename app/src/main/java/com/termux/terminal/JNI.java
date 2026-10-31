@@ -8,7 +8,15 @@ final class JNI {
     static {
         try {
             System.loadLibrary("termux");
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            try {
+                System.load("/data/data/com.mobile.nodeide/files/usr/lib/libtermux.so");
+            } catch (Throwable t2) {
+                try {
+                    System.load("/data/user/0/com.mobile.nodeide/files/usr/lib/libtermux.so");
+                } catch (Throwable ignored) {
+                }
+            }
         }
     }
 
