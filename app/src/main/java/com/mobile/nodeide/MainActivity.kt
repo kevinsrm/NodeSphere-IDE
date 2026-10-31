@@ -34,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedDestination = R.id.nav_projects
     private var changingDestination = false
 
+    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)

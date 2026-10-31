@@ -307,13 +307,6 @@ public final class TerminalSession extends TerminalOutput {
         }
     }
 
-    /** Write a String to the shell process UTF-8 encoded. */
-    public void write(String data) {
-        if (data == null) return;
-        byte[] bytes = data.getBytes(StandardCharsets.UTF_8);
-        write(bytes, 0, bytes.length);
-    }
-
     /** Write the Unicode code point to the terminal encoded in UTF-8. */
     public void writeCodePoint(boolean prependEscape, int codePoint) {
         if (codePoint > 1114111 || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
