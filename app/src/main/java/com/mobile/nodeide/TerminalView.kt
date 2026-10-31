@@ -207,6 +207,20 @@ class TerminalView @JvmOverloads constructor(
             onInput?.invoke(code)
             return
         }
+
+        // Eco local para retorno visual imediato do que o usuário digita
+        if (text == "\r" || text == "\n") {
+            emulator.feed("\r\n")
+            scheduleRender()
+        } else if (text == "\u007f" || text == "\b") {
+            emulator.feed("\b \b")
+            scheduleRender()
+        } else if (text.isNotEmpty() && text.all { it.code >= 32 }) {
+            emulator.feed(text)
+            scheduleRender()
+        }
+
+        scrollToBottom()
         onInput?.invoke(text)
     }
 
@@ -328,6 +342,7 @@ class TerminalView @JvmOverloads constructor(
             val columns = emulator.columns
             val scrollback = emulator.scrollbackSize
 
+            var computedCursorOffset = 0
             for (index in 0 until scrollback) {
                 val row = emulator.scrollbackRow(index)
                 if (row != null) {
@@ -343,20 +358,31 @@ class TerminalView @JvmOverloads constructor(
             )
 
             for (index in 0..lastActiveScreenRow) {
+                val rowStart = builder.length
                 val row = emulator.screenRow(index)
                 if (row != null) {
                     appendRow(builder, row, columns)
+                }
+                if (index == emulator.cursorRow) {
+                    val rowLen = builder.length - rowStart
+                    val col = emulator.cursorColumn
+                    if (col > rowLen) {
+                        repeat(col - rowLen) { builder.append(' ') }
+                    }
+                    computedCursorOffset = rowStart + col
                 }
                 if (index < lastActiveScreenRow) {
                     builder.append('\n')
                 }
             }
 
+            if (computedCursorOffset >= builder.length) {
+                builder.append(' ')
+            }
+            cursorOffset = computedCursorOffset.coerceIn(0, builder.length - 1)
+
             // Aplica detecção automática de links (localhost, URLs, portas)
             applyLinks(builder)
-
-            cursorOffset = ((scrollback + emulator.cursorRow) * (columns + 1) + emulator.cursorColumn)
-                .coerceIn(0, builder.length)
 
             textView.setText(builder, TextView.BufferType.SPANNABLE)
             applyCursor()
@@ -802,7 +828,7 @@ class TerminalView @JvmOverloads constructor(
 
         val BACKGROUND = 0xff070b16.toInt()
         val FOREGROUND = 0xffd7dceb.toInt()
-        val CURSOR = 0xff8ac6ff.toInt()
+        val CURSOR = 0xff38bdf8.toInt()
         val SELECTION = 0x663d6fb5.toInt()
         val LINK_COLOR = 0xff38bdf8.toInt() // Céu vibrante (#38bdf8)
 
