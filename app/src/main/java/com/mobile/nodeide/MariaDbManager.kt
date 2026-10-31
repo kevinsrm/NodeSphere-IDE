@@ -2,6 +2,7 @@ package com.mobile.nodeide
 
 import android.content.Context
 import android.util.Log
+import com.termux.terminal.TerminalSession
 import java.io.File
 import java.io.FileOutputStream
 import java.net.InetSocketAddress

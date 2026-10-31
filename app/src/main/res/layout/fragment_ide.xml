@@ -114,16 +114,33 @@
         android:orientation="vertical"
         android:background="#070B16">
 
-        <!-- Terminal: grade monoespaçada com cores ANSI, cursor, histórico
-             rolável e seleção/cópia nativas (toque longo). O teclado do sistema
-             digita direto nele. -->
-        <com.mobile.nodeide.TerminalView
+        <!-- Terminal oficial do Termux com suporte completo a cores ANSI 256,
+             cursor piscante, seleção nativa, histórico amplo e zoom sem distorção. -->
+        <com.termux.view.TerminalView
             android:id="@+id/terminal"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
             android:padding="6dp"
             android:background="#070B16" />
+
+        <HorizontalScrollView
+            android:id="@+id/linkScroll"
+            android:layout_width="match_parent"
+            android:layout_height="32dp"
+            android:visibility="gone"
+            android:background="#0A1224"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/linkBar"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp" />
+        </HorizontalScrollView>
 
         <HorizontalScrollView
             android:layout_width="match_parent"
