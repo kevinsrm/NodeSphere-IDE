@@ -160,7 +160,7 @@ class PluginsFragment : Fragment() {
             "npm" -> npmDialog()
             "terminal" -> openTerminal()
             "sqlite" -> openSqlite()
-            "mariadb", "mysql" -> mariadbDialog()
+            "mariadb", "mysql" -> main.show(MySqlServerFragment())
         }
     }
 

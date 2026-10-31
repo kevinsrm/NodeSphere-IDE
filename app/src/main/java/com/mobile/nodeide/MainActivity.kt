@@ -117,17 +117,12 @@ class MainActivity : AppCompatActivity() {
     /** Exibe um fragment e mantém a navegação inferior sincronizada. */
     fun show(fragment: Fragment) {
         val destination = when (fragment) {
-            is PluginsFragment -> R.id.nav_plugins
+            is PluginsFragment, is MySqlServerFragment -> R.id.nav_plugins
             is AgentFragment -> R.id.nav_agent
             else -> R.id.nav_projects
         }
         selectDestination(destination)
-        // O editor ocupa a tela inteira: a barra de navegação inferior só aparece
-        // nas telas de projetos, plugins e agente.
-        navigation.visibility = if (fragment is IdeFragment) View.GONE else View.VISIBLE
-        // Fragment navigation can be triggered by an import/clone worker after the
-        // Activity has saved its state. In that case commit() throws and used to
-        // take down the whole editor; retaining the latest destination is safer.
+        navigation.visibility = if (fragment is IdeFragment || fragment is MySqlServerFragment) View.GONE else View.VISIBLE
         supportFragmentManager.beginTransaction()
             .setReorderingAllowed(true)
             .replace(R.id.content, fragment)
